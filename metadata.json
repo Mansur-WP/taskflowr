@@ -1,0 +1,6 @@
+{
+  "name": "TaskFlowr",
+  "description": "A feature-rich, beautiful, and secure real-time To-Do List web application with authentication, task prioritization, drag-and-drop ordering, calendars, analytics charts, and data export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

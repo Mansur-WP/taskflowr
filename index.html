@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TaskFlowr • Workspace</title>
+    <script>
+      (function() {
+        try {
+          var originalFetch = window.fetch;
+          
+          function wrapFetch(underlyingFetch) {
+            return function(input, init) {
+              var urlString = typeof input === 'string' ? input : (input && input.url || '');
+              if (urlString.indexOf('/api/') === 0 || urlString.indexOf(window.location.origin + '/api/') === 0) {
+                init = init || {};
+                var token = localStorage.getItem('session_token');
+                
+                if (typeof Headers !== 'undefined' && init.headers instanceof Headers) {
+                  if (token && !init.headers.has('Authorization')) {
+                    init.headers.set('Authorization', 'Bearer ' + token);
+                  }
+                  if (!init.headers.has('X-Requested-With')) {
+                    init.headers.set('X-Requested-With', 'XMLHttpRequest');
+                  }
+                } else if (Array.isArray(init.headers)) {
+                  var hasAuth = false;
+                  var hasEx = false;
+                  for (var i = 0; i < init.headers.length; i++) {
+                    if (init.headers[i][0] && init.headers[i][0].toLowerCase() === 'authorization') hasAuth = true;
+                    if (init.headers[i][0] && init.headers[i][0].toLowerCase() === 'x-requested-with') hasEx = true;
+                  }
+                  if (token && !hasAuth) init.headers.push(['Authorization', 'Bearer ' + token]);
+                  if (!hasEx) init.headers.push(['X-Requested-With', 'XMLHttpRequest']);
+                } else {
+                  init.headers = init.headers || {};
+                  if (token && !init.headers['Authorization'] && !init.headers['authorization']) {
+                    init.headers['Authorization'] = 'Bearer ' + token;
+                  }
+                  if (!init.headers['X-Requested-With'] && !init.headers['x-requested-with']) {
+                    init.headers['X-Requested-With'] = 'XMLHttpRequest';
+                  }
+                }
+              }
+              return underlyingFetch(input, init);
+            };
+          }
+
+          var currentFetch = wrapFetch(originalFetch);
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return currentFetch;
+            },
+            set: function(val) {
+              currentFetch = wrapFetch(val);
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          console.warn("Could not redefine window.fetch attribute:", e);
+        }
+
+        // Intercept and swallow WebSocket and HMR connection errors during sandboxed preview sessions
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event.reason;
+          if (reason) {
+            var msg = reason.message || (typeof reason === 'string' ? reason : '');
+            if (msg.indexOf('WebSocket') !== -1 || msg.indexOf('websocket') !== -1 || msg.indexOf('closed without opened') !== -1) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          var msg = event.message || '';
+          if (msg.indexOf('WebSocket') !== -1 || msg.indexOf('websocket') !== -1 || msg.indexOf('closed without opened') !== -1) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }, true);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

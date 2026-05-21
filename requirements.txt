@@ -1,0 +1,11 @@
+# Theoretical Python Portable Deployment Requirements
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+Flask-WTF==1.2.1
+Werkzeug==3.0.3
+email-validator==2.1.1
+gunicorn==22.0.0
+jinja2==3.1.4
+MarkupSafe==2.1.5
+python-dotenv==1.0.1
