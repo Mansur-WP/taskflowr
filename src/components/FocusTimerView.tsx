@@ -35,7 +35,7 @@ export default function FocusTimerView({ tasks, toast }: FocusTimerViewProps) {
   const [muteSound, setMuteSound] = useState(false);
 
   // Soundscape States
-  const [activeSound, setActiveSound] = useState<'off' | 'pink' | 'ocean' | 'cosmic'>('off');
+  const [activeSound, setActiveSound] = useState<'off' | 'pink' | 'ocean' | 'cosmic' | 'nasheed'>('off');
   const [soundVolume, setSoundVolume] = useState<number>(0.2); // Default to low soothing levels
 
   // Web Audio Contexts & Node References
@@ -43,6 +43,7 @@ export default function FocusTimerView({ tasks, toast }: FocusTimerViewProps) {
   const mainGainRef = useRef<GainNode | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
   const secondaryNodesRef = useRef<any[]>([]);
+  const nasheedIntervalRef = useRef<any>(null);
 
   const initialTimes: Record<TimerMode, number> = {
     work: 25 * 60,
@@ -55,6 +56,10 @@ export default function FocusTimerView({ tasks, toast }: FocusTimerViewProps) {
   // procedural clean soundscape controls
   const stopSoundscape = () => {
     try {
+      if (nasheedIntervalRef.current) {
+        clearInterval(nasheedIntervalRef.current);
+        nasheedIntervalRef.current = null;
+      }
       if (sourceNodeRef.current) {
         sourceNodeRef.current.stop();
         sourceNodeRef.current.disconnect();
@@ -70,7 +75,7 @@ export default function FocusTimerView({ tasks, toast }: FocusTimerViewProps) {
     }
   };
 
-  const startSoundscape = (type: 'pink' | 'ocean' | 'cosmic') => {
+  const startSoundscape = (type: 'pink' | 'ocean' | 'cosmic' | 'nasheed') => {
     stopSoundscape();
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -190,6 +195,177 @@ export default function FocusTimerView({ tasks, toast }: FocusTimerViewProps) {
         subOsc.start();
 
         secondaryNodesRef.current = [osc1, osc2, subOsc, subGain, lpFilter];
+      } else if (type === 'nasheed') {
+        // High-Fidelity Procedurally Synthesized Arabic Mudhah / Meditative Hijaz Humming
+        // Utilizes the passionate, contemplative D Hijaz Maqam: D - Eb - F# - G - A - Bb - C
+        const hijazScale = [
+          293.66, // D4 (Root)
+          311.13, // Eb4 (Flat 2nd)
+          369.99, // F#4 (Major 3rd)
+          392.00, // G4 (Perfect 4th)
+          440.00, // A4 (Perfect 5th)
+          466.16, // Bb4 (Flat 6th)
+          523.25, // C5 (Flat 7th)
+          587.33  // D5 (Octave)
+        ];
+
+        // Beautiful, calming custom-arranged Hijaz vocal melody phrase
+        const melody = [
+          293.66, 311.13, 369.99, 392.00, 369.99, 311.13, 293.66, // Phrase 1: Ascent & descent
+          369.99, 392.00, 440.00, 466.16, 440.00, 392.00, 369.99, // Phrase 2: Reaching higher notes
+          440.00, 466.16, 523.25, 466.16, 440.00, 392.00, 369.99, 311.13, // Phrase 3: Climax & descent
+          293.66, 311.13, 293.66, 233.08, 220.00, 185.00, 196.00, 185.00, 146.83 // Phrase 4: Root chest resolve
+        ];
+
+        let noteIndex = 0;
+
+        // --- DEEP REVERBERATING ECHO & ACOUSTIC COGNITION SPACE ---
+        // Generates atmospheric canyon/prayer-hall echoes
+        const delayLeft = ctx.createDelay(2.0);
+        const delayRight = ctx.createDelay(2.0);
+        
+        delayLeft.delayTime.setValueAtTime(0.72, ctx.currentTime);
+        delayRight.delayTime.setValueAtTime(0.96, ctx.currentTime);
+
+        const feedbackLeft = ctx.createGain();
+        const feedbackRight = ctx.createGain();
+        feedbackLeft.gain.setValueAtTime(0.55, ctx.currentTime);
+        feedbackRight.gain.setValueAtTime(0.55, ctx.currentTime);
+
+        // Cross feedback loop for rich stereo-like sound
+        delayLeft.connect(feedbackLeft);
+        feedbackLeft.connect(delayLeft);
+        feedbackLeft.connect(delayRight); // Cross
+
+        delayRight.connect(feedbackRight);
+        feedbackRight.connect(delayRight);
+        feedbackRight.connect(delayLeft); // Cross
+
+        const delayOutputGain = ctx.createGain();
+        delayOutputGain.gain.setValueAtTime(0.40, ctx.currentTime);
+
+        delayLeft.connect(delayOutputGain);
+        delayRight.connect(delayOutputGain);
+        delayOutputGain.connect(masterGain);
+
+        // --- BACKGROUND CHOIR VOWEL HUMMERS ---
+        // Holds rich, calming low chest notes
+        const droneFreqs = [146.83, 220.00, 196.00]; // D3, A3, G3
+        const choirFilter = ctx.createBiquadFilter();
+        choirFilter.type = 'lowpass';
+        choirFilter.frequency.setValueAtTime(260, ctx.currentTime); // Deep warm vocal resonance
+
+        const choirFormant = ctx.createBiquadFilter();
+        choirFormant.type = 'peaking';
+        choirFormant.frequency.setValueAtTime(320, ctx.currentTime); // Human vocal chest-muffler ("Mmmm")
+        choirFormant.Q.setValueAtTime(3.0, ctx.currentTime);
+        choirFormant.gain.setValueAtTime(12, ctx.currentTime);
+
+        choirFilter.connect(choirFormant);
+        choirFormant.connect(masterGain);
+        choirFormant.connect(delayLeft);
+
+        droneFreqs.forEach((freq, idx) => {
+          const droneOsc = ctx.createOscillator();
+          const droneGain = ctx.createGain();
+          
+          droneOsc.type = idx === 0 ? 'sine' : 'triangle';
+          droneOsc.frequency.setValueAtTime(freq + (Math.random() * 0.8 - 0.4), ctx.currentTime);
+
+          // Subtle pitch vibrato for organic movement
+          const choirVibrato = ctx.createOscillator();
+          choirVibrato.frequency.setValueAtTime(3.8 + idx * 0.4, ctx.currentTime);
+          const choirVibratoGain = ctx.createGain();
+          choirVibratoGain.gain.setValueAtTime(0.3, ctx.currentTime);
+          choirVibrato.connect(choirVibratoGain);
+          choirVibratoGain.connect(droneOsc.frequency);
+          choirVibrato.start();
+
+          // Breathing simulator for each choir voice
+          const choirBreath = ctx.createOscillator();
+          choirBreath.frequency.setValueAtTime(0.06 + idx * 0.02, ctx.currentTime);
+          const choirBreathGain = ctx.createGain();
+          choirBreathGain.gain.setValueAtTime(0.04, ctx.currentTime);
+          choirBreath.connect(choirBreathGain);
+          
+          droneGain.gain.setValueAtTime(0.04, ctx.currentTime);
+          choirBreathGain.connect(droneGain.gain);
+
+          droneOsc.connect(droneGain);
+          droneGain.connect(choirFilter);
+
+          droneOsc.start();
+          choirBreath.start();
+          secondaryNodesRef.current.push(droneOsc, droneGain, choirBreath, choirBreathGain, choirVibrato, choirVibratoGain);
+        });
+
+        // --- LEAD VOCAL SYNTHESIZER (SOULFUL HUMMING VOICE) ---
+        const leadOsc = ctx.createOscillator();
+        leadOsc.type = 'triangle'; // Smooth, warm, vocal-like fundamental shape
+        leadOsc.frequency.setValueAtTime(melody[0], ctx.currentTime);
+
+        const leadGain = ctx.createGain();
+        leadGain.gain.setValueAtTime(0.0, ctx.currentTime);
+        leadGain.gain.linearRampToValueAtTime(0.14, ctx.currentTime + 3.0); // Slow spiritual fade-in
+
+        // Vocal Formant filters to replicate vocal tract "Mmmm -> Oooo" transitions
+        const nasalFilter = ctx.createBiquadFilter();
+        nasalFilter.type = 'bandpass';
+        nasalFilter.frequency.setValueAtTime(420, ctx.currentTime); // Dynamic formant tracking
+        nasalFilter.Q.setValueAtTime(2.2, ctx.currentTime);
+
+        const throatFilter = ctx.createBiquadFilter();
+        throatFilter.type = 'lowpass';
+        throatFilter.frequency.setValueAtTime(550, ctx.currentTime);
+
+        leadOsc.connect(nasalFilter);
+        nasalFilter.connect(throatFilter);
+        throatFilter.connect(leadGain);
+
+        leadGain.connect(masterGain);
+        leadGain.connect(delayLeft); // Sends vocal hum deeply into the canyon echoes
+
+        // Lead Vibrato: mimics emotional, micro-fluctuated breathing patterns of a native chanter
+        const leadVibrato = ctx.createOscillator();
+        leadVibrato.frequency.setValueAtTime(4.4, ctx.currentTime); // Authentic 4.4Hz vibrato rhythm
+        const leadVibratoGain = ctx.createGain();
+        leadVibratoGain.gain.setValueAtTime(1.5, ctx.currentTime); 
+        leadVibrato.connect(leadVibratoGain);
+        leadVibratoGain.connect(leadOsc.frequency);
+        leadVibrato.start();
+
+        // Slow Formant modulator waves (generates automatic voweling "Ooo/Uuu/Mmm")
+        const formantModulator = ctx.createOscillator();
+        formantModulator.frequency.setValueAtTime(0.12, ctx.currentTime); // Sweeps every ~8 seconds
+        const formantGain = ctx.createGain();
+        formantGain.gain.setValueAtTime(180, ctx.currentTime); // Sweeps center frequency by 180hz
+        formantModulator.connect(formantGain);
+        formantGain.connect(nasalFilter.frequency);
+        formantModulator.start();
+
+        leadOsc.start();
+        secondaryNodesRef.current.push(
+          leadOsc, leadGain, nasalFilter, throatFilter, 
+          leadVibrato, leadVibratoGain, formantModulator, formantGain,
+          delayLeft, delayRight, feedbackLeft, feedbackRight, delayOutputGain
+        );
+
+        // --- MELODY SEQUENCER RHYTHM LOOP ---
+        // Sequentially transition lead humming voice tones gracefully
+        nasheedIntervalRef.current = setInterval(() => {
+          if (ctx.state === 'closed') return;
+          noteIndex = (noteIndex + 1) % melody.length;
+          const targetFreq = melody[noteIndex];
+          const now = ctx.currentTime;
+
+          // Apply natural portamento pitch sweep (gliding smoothly over Hijaz intervals)
+          leadOsc.frequency.exponentialRampToValueAtTime(targetFreq, now + 1.8); // 1.8s breath glissando
+
+          // Simulate natural singers breathing (slight momentary dip in volume before notes)
+          leadGain.gain.setValueAtTime(0.14, now);
+          leadGain.gain.exponentialRampToValueAtTime(0.08, now + 0.1);
+          leadGain.gain.exponentialRampToValueAtTime(0.15, now + 1.2);
+        }, 3400); // Transitions to a beautiful, new Hijaz note every 3.4 seconds
       }
     } catch(err) {
       console.warn('Audio start failure under frame policies:', err);
@@ -568,19 +744,20 @@ export default function FocusTimerView({ tasks, toast }: FocusTimerViewProps) {
           <div className="p-5 glass-panel rounded-2xl shadow-md border-white/5 space-y-4">
             <div className="flex items-center gap-2 pb-2 border-b border-white/10">
               <Music className="w-4 h-4 text-indigo-500 shrink-0" />
-              <h2 className="text-sm font-bold text-gray-950 dark:text-white">White Noise Synthesizer</h2>
+              <h2 className="text-sm font-bold text-gray-950 dark:text-white">Ambient Soundscape Synthesizer</h2>
             </div>
             
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal">
-              Isolate distraction with high-quality procedural white noise & natural wave frequencies generated locally.
+              Isolate distraction with high-quality procedural white noise, natural waves, and spiritual vocal frequencies generated live.
             </p>
 
-            <div className="grid grid-cols-2 gap-2 text-center text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-2 text-center text-xs">
               {[
                 { id: 'off', label: 'None', icon: VolumeX },
                 { id: 'pink', label: 'Pink Noise', icon: Volume2 },
                 { id: 'ocean', label: 'Ocean Tide', icon: Sparkles },
-                { id: 'cosmic', label: 'Cosmic Hum', icon: Coffee }
+                { id: 'cosmic', label: 'Cosmic Hum', icon: Coffee },
+                { id: 'nasheed', label: 'Spiritual Hum', icon: Compass }
               ].map((sound) => {
                 const SoundIcon = sound.icon;
                 const isSelected = activeSound === sound.id;
@@ -595,7 +772,7 @@ export default function FocusTimerView({ tasks, toast }: FocusTimerViewProps) {
                     }`}
                   >
                     <SoundIcon className="w-4 h-4 mb-1" />
-                    <span className="text-[10px] tracking-wide">{sound.label}</span>
+                    <span className="text-[10px] tracking-wide font-medium">{sound.label}</span>
                   </button>
                 );
               })}
