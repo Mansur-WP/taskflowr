@@ -1,140 +1,87 @@
-# 🪐 TaskFlow - Modern Full-Stack To-Do Workspace
+# 🪐 TaskFlowr • Premium Personal Progress Workspace
 
-Welcome to **TaskFlow**, a secure, feature-rich, and visually stunning Full-Stack To-Do with drag-and-drop sequencing, monthly calendars, dynamic bento analytics, and data spreadsheets exporter. 
-
-Designed for high-performance and absolute security, this workspace represents an ultra-responsive client-server architecture.
+Welcome to **TaskFlowr**, a secure, highly polished, and visually stunning Full-Stack Personal Productivity Hub. Built with a bespoke dark cosmic theme, TaskFlowr streamlines your daily workspace with custom task queues, drag-and-drop ordering, calendars, bento analytics dashboards, focus timers, and bulletproof user security safeguards.
 
 ---
 
-## 🎨 Design Conceptions & Visual Integrity
+## 🎨 Design Conceptions & Visual Identity
 
-TaskFlow is crafted with a highly polished aesthetic pairing, utilizing generous negative space, crisp responsive dimensions, and interactive hover details:
-- **Responsive Sidebar Navigation**: Collapses automatically on mobile devices into an overlay side drawer.
-- **Micro-Animations**: Staggered enter transitions and fluid drag feedback powered by `motion/react`.
-- **Cosmic Dark Mode Alt-D**: Standard light and dark canvas colors, toggleable with a mouse click or hotkey (`ALT + D`).
-- **Real-Time Stat Counters**: Real-time calculated goals trackers (Total, Completed, Pending tasks) accompanied by dynamic circular SVG progress gauges.
-- **Active Alerts Simulation**: Active System Notifications logs highlighting imminent task deadlines inside index margins.
+TaskFlowr is crafted with a meticulous, modern eye for aesthetics, typography, and response-driven interactive designs:
+- **Custom App Logo**: An elegant vector signature logo configured in `AppLogo.tsx` — a modern, ribbon-folded "F" blending royal blue, cyan, indigo, and violet gradients overlaid with a sharp 3D shadow-dropped checkmark.
+- **Micro-Favicon Support**: A responsive SVG favicon rendered in standard browser chrome tabs matching the deep indigo and cyan ribbon aesthetic.
+- **Bespoke Deep Purple Canvas**: Dark frames crafted on top of heavy cosmic indigo, violet, and obsidian midnight backgrounds (`#09051d`, `#08051a`) accented by rich neon boundaries.
+- **Responsive Workspace Navigation**: A heavy, dynamic sidebar collapsing beautifully into an app bar header custom-fit for mobile devices.
+- **Fluid Micro-Animations**: Smooth scale transforms, hover spring offsets, and layout state shifts programmed via `motion/react`.
 
 ---
 
-## 🚀 Feature Highlights
+## 🚀 Key Feature Upgrades
 
-### 🔒 Secure User Authentication
-- Dual register and login screens equipped with password validation checks.
-- Zero raw cookies storage—sessions are verified server-side with cryptographic HMAC signatures.
-- Anti-CSRF protection guarding sensitive task-alteration endpoints.
+### 🔒 Gmail Guardian Safeguards & Verification
+- **Anti-Hijacking Auth Flow**: New user registrations require requesting and verifying a simulated 6-digit OTP verification code dispatched instantly to your registered Gmail address.
+- **Secured Credential Reset**: Modifying your security credentials inside preferences demands real-time ownership validation via a fresh 6-digit Gmail OTP safeguard to prevent password tampering.
 
-### 📐 Robust To-Do Controller
-- **Drag & Drop Arranger**: Rearrange tasks natively with standard HTML5 drag actions (`onDragStart`, `onDrop`), persisting order seamlessly.
-- **Advanced Querying**: Search titles and descriptions dynamically, combined with priority, tag (category), and status selectors.
-- **Inline Editing Modal**: Refine priority, categories, descriptions, or deadlines inline.
-- **Due Date Audit**: Colorful tag alerts highlighting overdue items.
-- **Pagination**: Scroll past long task listing rows smoothly.
+### 👤 Verified Personal Workspace ("My Data Only")
+- **True Account Bounds**: Every task, statistic, project milestone, and timeline record is rigorously sandboxed to your credentials.
+- **Personalized Assignments**: Task delegations are exclusively bound to you (`YOUR_NAME (You)`), cleaning out any secondary pseudo-accounts or random dummy test-user entries.
 
-### 📅 Visual Calendar Grid
-- Monthly date cells displaying colored dots for scheduled tasks.
-- Selecting any card day fires up a quick slide-out lists drawer to resolve tasks.
+### 📐 High-Performance Task Engine
+- **HTML5 Drag & Drop Arranger**: Reorder task positions cleanly inside status lanes; card layouts capture layout shifts and serialize position variables natively to local files.
+- **Interactive Checklists**: Inline sub-task progress indicator columns representing real-time percentage progress bars matching the glowing primary gradients.
+- **Dynamic Due Date Tracker**: Overdue notices warning of expired deadlines dynamically.
 
-### 📊 bento Analytics
-- Direct **Export to CSV** streaming attachment downloads.
-- Priority pipelines horizontal tracking bars.
-- Dynamic task completion health gauges.
+### 📅 Unified Productivity Toolkit
+- **Monthly Scheduler**: High-fidelity month view showing scheduled item calendars. Clicking any day opens up side drawer task overlays.
+- **Bento Analytics Hub**: Download raw CSV spreadsheet records alongside sleek circular custom metrics gauges.
+- **Focus Work Timer**: Elegant countdown interval utility built to power deep focus sprints.
 
 ---
 
 ## 🏗️ Technical Architecture
 
-This application operates as a **Full-Stack Express + Node.js + React.js + TypeScript** powerhouse, running behind a reverse-proxy layer on **Port 3000**:
+TaskFlowr operates as an absolute **Full-Stack Express + Node.js + React + TS** application, serving dynamic resources on **Port 3000**:
 
 ```
-project/
-├── server.ts                 # Express Core Server (managing API routes, cookie tokens, serving assets)
+taskflowr/
+├── server.ts                 # Express core framework (API controllers, sessions, static asset routes)
 ├── server/
-│   └── db.ts                 # Database Engine (relational tables mock written to instance logs)
+│   └── db.ts                 # Logically isolated database handlers & credentials encryption
 ├── data/
-│   └── db.json               # Relational SQLite-equivalent local file-lock database
+│   └── db.json               # Relational local persistent repository
 ├── src/
-│   ├── App.tsx               # Workspace Coordinate states hub
-│   ├── types.ts              # Global Type Definitions
-│   ├── index.css             # Tailwind v4 configuration and typographic imports
+│   ├── App.tsx               # Primary react workspace state system
+│   ├── types.ts              # Absolute TypeScript interfaces & enums
+│   ├── index.css             # Tailwind styling base with custom typography variables
 │   └── components/
-│       ├── AuthView.tsx      # Registration & Login Controllers
-│       ├── Sidebar.tsx       # Navigation Drawer and Dark Mode Toggle
-│       ├── DashboardView.tsx # Bento Overview & System Notification reminders
-│       ├── TaskListView.tsx  # Task Cards & HTML5 Drag Handler
-│       ├── CalendarView.tsx  # Monthly deadliner cells mapping
-│       ├── AnalyticsView.tsx # SVG statistical charts & CSV exporter trigger
-│       └── ProfileView.tsx   # Preferred customization settings
+│       ├── AppLogo.tsx       # Bespoke 3D folded F brand logo vector
+│       ├── AuthView.tsx      # Secure registry workspace with Gmail OTP check
+│       ├── Sidebar.tsx       # Adaptive lateral navigation deck
+│       ├── DashboardView.tsx # Bento analytics outline
+│       ├── TaskListView.tsx  # Interactive lists with full drag-and-drop controller
+│       ├── CalendarView.tsx  # Event tracking calendars
+│       ├── FocusTimerView.tsx# Interval work timer
+│       └── ProfileView.tsx   # Verified preferences & security settings drawer
 ```
 
 ---
 
 ## 💻 Quick Installation & Running Locally
 
-### Node.js & React Full-Stack (Default Recommended)
+Ensure Node.js is active on your device, then execute:
 
 1. **Install Base Modules**:
    ```bash
    npm install
    ```
 
-2. **Boot Development Environment**:
+2. **Boot Development Server**:
    ```bash
    npm run dev
    ```
-   Open `http://localhost:3000` to interact with TaskFlow.
+   *Your server will initiate on host `0.0.0.0:3000` automatically.*
 
-3. **Production Compliant Bundling**:
+3. **Production Compilation**:
    ```bash
    npm run build
    npm run start
    ```
-
----
-
-## 🐍 Auxiliary Python Flask Target (For Portable Deployment)
-
-If you prefer building in Python Flask as secondary deployment target (under Render, Railway, or PythonAnywhere):
-
-### 1. Requirements list (`requirements.txt`)
-Create a python virtual environment, install requirements listed under `/requirements.txt`:
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Flask MVC Blueprint equivalent schemas:
-The server-side modules are fully identical to the JSON engine schemas declared under `server/db.ts`:
-```python
-# app/models.py
-from flask_sqlalchemy import SQLAlchemy
-from flask_login import UserMixin
-from datetime import datetime
-
-db = SQLAlchemy()
-
-class User(db.Model, UserMixin):
-    id = db.Column(db.String(36), primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128), nullable=False)
-    profile_color = db.Column(db.String(7), default="#3b82f6")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-class Task(db.Model):
-    id = db.Column(db.String(36), primary_key=True)
-    title = db.Column(db.String(150), nullable=False)
-    description = db.Column(db.Text, nullable=True)
-    priority = db.Column(db.String(10), default="medium") # low, medium, high
-    category = db.Column(db.String(50), default="General")
-    completed = db.Column(db.Boolean, default=False)
-    due_date = db.Column(db.String(10), nullable=True) # YYYY-MM-DD
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
-    position = db.Column(db.Integer, default=1000)
-```
-
-### 3. Running Flask Server:
-```bash
-python run.py
-```
-*(The Flask Blueprint structure mimics our controller pathways under `/server.ts` directly, binding REST APIs to SQLAlchemy).*
