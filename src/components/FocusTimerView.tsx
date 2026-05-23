@@ -13,7 +13,9 @@ import {
   Clock, 
   Compass,
   Lightbulb,
-  BellRing
+  BellRing,
+  Music,
+  VolumeX
 } from 'lucide-react';
 import { Task } from '../types.js';
 
@@ -32,6 +34,16 @@ export default function FocusTimerView({ tasks, toast }: FocusTimerViewProps) {
   const [completedSessions, setCompletedSessions] = useState<number>(0);
   const [muteSound, setMuteSound] = useState(false);
 
+  // Soundscape States
+  const [activeSound, setActiveSound] = useState<'off' | 'pink' | 'ocean' | 'cosmic'>('off');
+  const [soundVolume, setSoundVolume] = useState<number>(0.2); // Default to low soothing levels
+
+  // Web Audio Contexts & Node References
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const mainGainRef = useRef<GainNode | null>(null);
+  const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  const secondaryNodesRef = useRef<any[]>([]);
+
   const initialTimes: Record<TimerMode, number> = {
     work: 25 * 60,
     shortBreak: 5 * 60,
@@ -39,6 +51,175 @@ export default function FocusTimerView({ tasks, toast }: FocusTimerViewProps) {
   };
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // procedural clean soundscape controls
+  const stopSoundscape = () => {
+    try {
+      if (sourceNodeRef.current) {
+        sourceNodeRef.current.stop();
+        sourceNodeRef.current.disconnect();
+        sourceNodeRef.current = null;
+      }
+      secondaryNodesRef.current.forEach((n) => {
+        try { n.stop(); } catch(e) {}
+        try { n.disconnect(); } catch(e) {}
+      });
+      secondaryNodesRef.current = [];
+    } catch (e) {
+      console.warn('Soundscape clear warn:', e);
+    }
+  };
+
+  const startSoundscape = (type: 'pink' | 'ocean' | 'cosmic') => {
+    stopSoundscape();
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new AudioContextClass();
+      }
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+
+      // Main Gain Node
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(soundVolume, ctx.currentTime);
+      masterGain.connect(ctx.destination);
+      mainGainRef.current = masterGain;
+
+      if (type === 'pink') {
+        // High quality pink noise generator
+        const bufferSize = 2 * ctx.sampleRate;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+        for (let i = 0; i < bufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          b0 = 0.99886 * b0 + white * 0.0555179;
+          b1 = 0.99332 * b1 + white * 0.0750759;
+          b2 = 0.96900 * b2 + white * 0.1538520;
+          b3 = 0.86650 * b3 + white * 0.3104856;
+          b4 = 0.55000 * b4 + white * 0.5329522;
+          b5 = -0.7616 * b5 - white * 0.0168980;
+          output[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+          output[i] *= 0.08; 
+          b6 = white * 0.115926;
+        }
+
+        const source = ctx.createBufferSource();
+        source.buffer = noiseBuffer;
+        source.loop = true;
+
+        const warmCut = ctx.createBiquadFilter();
+        warmCut.type = 'lowpass';
+        warmCut.frequency.setValueAtTime(650, ctx.currentTime);
+
+        source.connect(warmCut);
+        warmCut.connect(masterGain);
+        source.start();
+        sourceNodeRef.current = source;
+
+      } else if (type === 'ocean') {
+        // Slow modulated wave simulator
+        const bufferSize = 2 * ctx.sampleRate;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+
+        const source = ctx.createBufferSource();
+        source.buffer = noiseBuffer;
+        source.loop = true;
+
+        const bpFilter = ctx.createBiquadFilter();
+        bpFilter.type = 'lowpass';
+        bpFilter.frequency.setValueAtTime(320, ctx.currentTime);
+        bpFilter.Q.setValueAtTime(2.0, ctx.currentTime);
+
+        const lfo = ctx.createOscillator();
+        lfo.frequency.setValueAtTime(0.09, ctx.currentTime); // Wave period 11s
+
+        const lfoGain = ctx.createGain();
+        lfoGain.gain.setValueAtTime(220, ctx.currentTime);
+
+        lfo.connect(lfoGain);
+        lfoGain.connect(bpFilter.frequency);
+
+        source.connect(bpFilter);
+        bpFilter.connect(masterGain);
+
+        source.start();
+        lfo.start();
+        sourceNodeRef.current = source;
+        secondaryNodesRef.current = [lfo, lfoGain, bpFilter];
+
+      } else if (type === 'cosmic') {
+        // detuned warm solfeggio drone
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const subOsc = ctx.createOscillator();
+
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(216, ctx.currentTime); // Calming detuned 432Hz half frequency
+
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(217.5, ctx.currentTime);
+
+        subOsc.type = 'sine';
+        subOsc.frequency.setValueAtTime(108, ctx.currentTime); // Rich sub-bass base
+
+        const subGain = ctx.createGain();
+        subGain.gain.setValueAtTime(0.35, ctx.currentTime);
+
+        const lpFilter = ctx.createBiquadFilter();
+        lpFilter.type = 'lowpass';
+        lpFilter.frequency.setValueAtTime(140, ctx.currentTime);
+
+        osc1.connect(lpFilter);
+        osc2.connect(lpFilter);
+        subOsc.connect(subGain);
+        subGain.connect(lpFilter);
+        lpFilter.connect(masterGain);
+
+        osc1.start();
+        osc2.start();
+        subOsc.start();
+
+        secondaryNodesRef.current = [osc1, osc2, subOsc, subGain, lpFilter];
+      }
+    } catch(err) {
+      console.warn('Audio start failure under frame policies:', err);
+    }
+  };
+
+  // Sync sound volume changes
+  useEffect(() => {
+    if (mainGainRef.current && audioCtxRef.current) {
+      try {
+        mainGainRef.current.gain.setValueAtTime(soundVolume, audioCtxRef.current.currentTime);
+      } catch (e) {}
+    }
+  }, [soundVolume]);
+
+  // Handle active sound changes
+  useEffect(() => {
+    if (activeSound === 'off') {
+      stopSoundscape();
+    } else {
+      startSoundscape(activeSound);
+    }
+  }, [activeSound]);
+
+  // Clean-up on unmount
+  useEffect(() => {
+    return () => {
+      stopSoundscape();
+    };
+  }, []);
 
   // Sync mode changes to update timers
   useEffect(() => {
@@ -379,6 +560,62 @@ export default function FocusTimerView({ tasks, toast }: FocusTimerViewProps) {
                     {tasks.find((t) => t.id === selectedTaskId)?.title}
                   </span>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* AMBIENT FOCUS SOUNDSCAPE */}
+          <div className="p-5 glass-panel rounded-2xl shadow-md border-white/5 space-y-4">
+            <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+              <Music className="w-4 h-4 text-indigo-500 shrink-0" />
+              <h2 className="text-sm font-bold text-gray-950 dark:text-white">White Noise Synthesizer</h2>
+            </div>
+            
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal">
+              Isolate distraction with high-quality procedural white noise & natural wave frequencies generated locally.
+            </p>
+
+            <div className="grid grid-cols-2 gap-2 text-center text-xs">
+              {[
+                { id: 'off', label: 'None', icon: VolumeX },
+                { id: 'pink', label: 'Pink Noise', icon: Volume2 },
+                { id: 'ocean', label: 'Ocean Tide', icon: Sparkles },
+                { id: 'cosmic', label: 'Cosmic Hum', icon: Coffee }
+              ].map((sound) => {
+                const SoundIcon = sound.icon;
+                const isSelected = activeSound === sound.id;
+                return (
+                  <button
+                    key={sound.id}
+                    onClick={() => setActiveSound(sound.id as any)}
+                    className={`flex flex-col items-center justify-center p-2.5 rounded-xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-indigo-650 border-indigo-500 text-white shadow-md scale-102 font-bold'
+                        : 'bg-white/20 dark:bg-black/10 border-gray-100 dark:border-white/5 text-gray-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5'
+                    }`}
+                  >
+                    <SoundIcon className="w-4 h-4 mb-1" />
+                    <span className="text-[10px] tracking-wide">{sound.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeSound !== 'off' && (
+              <div className="space-y-1.5 pt-1">
+                <div className="flex justify-between text-[10px] uppercase font-mono font-bold text-gray-400 dark:text-slate-500">
+                  <span>Volume Intensity</span>
+                  <span>{Math.round(soundVolume * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.05"
+                  max="0.8"
+                  step="0.05"
+                  value={soundVolume}
+                  onChange={(e) => setSoundVolume(parseFloat(e.target.value))}
+                  className="w-full accent-indigo-550 h-1 bg-gray-200 dark:bg-slate-800 rounded-lg cursor-pointer"
+                />
               </div>
             )}
           </div>

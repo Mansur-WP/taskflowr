@@ -54,6 +54,39 @@ export default function DashboardView({
   const pendingCount = totalCount - completedCount;
   const compPercentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
+  // Category project stats with completion telemetry
+  const categoryStats = React.useMemo(() => {
+    const stats: Record<string, { total: number; completed: number }> = {};
+    tasks.forEach((t) => {
+      const cat = t.category || 'Other';
+      if (!stats[cat]) {
+        stats[cat] = { total: 0, completed: 0 };
+      }
+      stats[cat].total += 1;
+      if (t.completed) {
+        stats[cat].completed += 1;
+      }
+    });
+    return Object.entries(stats).map(([category, data]) => {
+      const percent = data.total > 0 ? Math.round((data.completed / data.total) * 100) : 0;
+      return {
+        category,
+        total: data.total,
+        completed: data.completed,
+        percent
+      };
+    });
+  }, [tasks]);
+
+  const getCategoryTheme = (cat: string) => {
+    const c = cat.toLowerCase();
+    if (c.includes('work')) return { stroke: 'stroke-indigo-500 dark:stroke-indigo-400', text: 'text-indigo-600 dark:text-indigo-450' };
+    if (c.includes('person')) return { stroke: 'stroke-emerald-500 dark:stroke-emerald-400', text: 'text-emerald-600 dark:text-emerald-450' };
+    if (c.includes('shop')) return { stroke: 'stroke-amber-500 dark:stroke-amber-400', text: 'text-amber-600 dark:text-amber-500' };
+    if (c.includes('stud')) return { stroke: 'stroke-violet-500 dark:stroke-violet-400', text: 'text-violet-600 dark:text-violet-450' };
+    return { stroke: 'stroke-cyan-500 dark:stroke-cyan-400', text: 'text-cyan-600 dark:text-cyan-450' };
+  };
+
   // Smart Reminders categorization
   const overdueTasks = tasks.filter(t => !t.completed && t.due_date && t.due_date < new Date().toISOString().split('T')[0]);
   const highPriorityTasks = tasks.filter(t => !t.completed && t.priority === 'high');
@@ -442,6 +475,70 @@ export default function DashboardView({
                 ? 'Create tasks to get an analytic overview of your target completions.' 
                 : `${completedCount} out of ${totalCount} tasks completed. Keep pushing forward!`}
             </div>
+          </div>
+
+          {/* Project Completion Rings Card */}
+          <div id="category-progress-breakdowns-card" className="p-5 glass-panel rounded-2xl shadow-md space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-light-slate-100 dark:border-white/5">
+              <h2 id="category-breakdowns-title" className="text-sm font-bold text-gray-900 dark:text-white">Project Progress</h2>
+              <span className="text-[9px] font-mono font-bold text-gray-400 dark:text-slate-500 uppercase tracking-widest">BY CATEGORY</span>
+            </div>
+            
+            {categoryStats.length === 0 ? (
+              <p className="text-xs text-center py-4 text-gray-400 dark:text-slate-500 italic">No category projects found. Add tasks to see breakdown statistics.</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3.5">
+                {categoryStats.map((stat) => {
+                  const theme = getCategoryTheme(stat.category);
+                  const circ = 113.1; // 2 * Math.PI * 18
+                  const strokeOffset = circ - (circ * stat.percent) / 100;
+                  
+                  return (
+                    <div 
+                      key={stat.category} 
+                      id={`project-completion-${stat.category.toLowerCase()}`}
+                      className="p-3 rounded-xl bg-white/20 dark:bg-black/10 border border-slate-150 dark:border-white/5 flex items-center gap-3 transition-transform hover:scale-[1.01]"
+                    >
+                      <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
+                        <svg className="w-12 h-12 transform -rotate-90">
+                          <circle
+                            cx="24"
+                            cy="24"
+                            r="18"
+                            className="stroke-gray-150 dark:stroke-white/5"
+                            strokeWidth="3.5"
+                            fill="transparent"
+                          />
+                          <circle
+                            cx="24"
+                            cy="24"
+                            r="18"
+                            className={`${theme.stroke} transition-all duration-700`}
+                            strokeWidth="3.5"
+                            fill="transparent"
+                            strokeDasharray={circ}
+                            strokeDashoffset={strokeOffset}
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                        <span className="absolute text-[10px] font-extrabold text-gray-950 dark:text-white">
+                          {stat.percent}%
+                        </span>
+                      </div>
+                      
+                      <div className="min-w-0 flex-1">
+                        <span className="block text-xs font-bold text-gray-950 dark:text-gray-150 truncate" title={stat.category}>
+                          {stat.category}
+                        </span>
+                        <span className="block text-[10px] font-semibold text-gray-500 dark:text-slate-400">
+                          {stat.completed}/{stat.total} Done
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* SIMULATED DUST OVER SMART REMINDERS ALERT BAR */}
