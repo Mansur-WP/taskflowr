@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Mail, Lock, User as UserIcon, Eye, EyeOff, ShieldAlert, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { AppLogo } from './AppLogo.js';
 
 interface AuthViewProps {
   onAuthSuccess: (user: any, token?: string) => void;
@@ -18,10 +19,50 @@ export default function AuthView({ onAuthSuccess, toast }: AuthViewProps) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  // Gmail Verification States
+  const [gmailCode, setGmailCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [simulatedCode, setSimulatedCode] = useState('');
+
   // Password validation checks
   const hasMinLength = password.length >= 6;
   const hasLetter = /[a-zA-Z]/.test(password);
   const hasNumber = /[0-9]/.test(password);
+
+  const sendGmailCode = async () => {
+    if (!email) {
+      toast('Please enter your email address first', 'error');
+      return;
+    }
+    if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+      toast('Please enter a valid email address', 'error');
+      return;
+    }
+
+    setSendingCode(true);
+    try {
+      const resp = await fetch('/api/auth/send-code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({ email, purpose: 'register' })
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.error || 'Failed to dispatch verification code.');
+      }
+      setCodeSent(true);
+      setSimulatedCode(data.code || '');
+      toast('Gmail security safeguard: Verification code simulated!', 'success');
+    } catch (err: any) {
+      toast(err.message || 'Error occurred dispatching verification code.', 'error');
+    } finally {
+      setSendingCode(false);
+    }
+  };
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,6 +85,10 @@ export default function AuthView({ onAuthSuccess, toast }: AuthViewProps) {
         toast('Passwords do not match', 'error');
         return;
       }
+      if (!gmailCode) {
+        toast('Please request and enter your 6-digit Gmail verification code', 'error');
+        return;
+      }
     } else {
       if (!email || !password) {
         toast('Please enter credentials and password', 'error');
@@ -55,7 +100,7 @@ export default function AuthView({ onAuthSuccess, toast }: AuthViewProps) {
     const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
     const payload = isLogin 
       ? { identity: email, password }
-      : { username, email, password };
+      : { username, email, password, code: gmailCode };
 
     try {
       const resp = await fetch(endpoint, {
@@ -110,8 +155,8 @@ export default function AuthView({ onAuthSuccess, toast }: AuthViewProps) {
         <div className="p-8">
           {/* Logo & Header */}
           <div className="text-center mb-8">
-            <div className="mx-auto w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center text-white font-bold text-xl mb-3 shadow-lg shadow-indigo-500/20 animate-pulse">
-              ✓
+            <div className="flex justify-center mb-3">
+              <AppLogo className="w-14 h-14 hover:scale-105 transition-transform" />
             </div>
             <h1 id="auth-title" className="text-2xl font-bold text-gray-900 dark:text-white mb-2 tracking-tight">
               {isLogin ? 'Sign In to TaskFlowr' : 'Create an Account'}
@@ -244,6 +289,53 @@ export default function AuthView({ onAuthSuccess, toast }: AuthViewProps) {
                   )}
                   <span className={hasNumber ? 'text-emerald-600 line-through' : ''}>Contains a digit</span>
                 </div>
+              </div>
+            )}
+
+            {/* GMAIL SAFEGUARD VERIFICATION PANEL */}
+            {!isLogin && (
+              <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-500/15 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="block text-[11px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest font-mono">
+                    Gmail Verification
+                  </span>
+                  <button
+                    type="button"
+                    disabled={sendingCode || !email}
+                    onClick={sendGmailCode}
+                    className="text-[10px] font-extrabold text-indigo-650 dark:text-indigo-400 uppercase tracking-wider hover:underline transition select-none disabled:opacity-50 cursor-pointer"
+                  >
+                    {sendingCode ? 'Dispatching...' : codeSent ? 'Resend Code' : 'Send Code'}
+                  </button>
+                </div>
+
+                {codeSent ? (
+                  <div className="space-y-2">
+                    <p className="text-[10px] text-gray-500 dark:text-slate-400">
+                      We simulated sending a 6-digit confirmation code to your registered Gmail address.
+                    </p>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      required
+                      value={gmailCode}
+                      onChange={(e) => setGmailCode(e.target.value.replace(/\D/g, ''))}
+                      className="w-full tracking-[0.25em] text-center py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-black/40 text-gray-900 dark:text-white text-base font-bold focus:outline-none focus:border-indigo-500"
+                      placeholder="000000"
+                    />
+                    
+                    {simulatedCode && (
+                      <div className="p-2.5 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/5 border border-emerald-500/20 text-center text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center justify-center gap-1.5 animate-pulse">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Simulated Gmail Alert: Code is <b className="font-extrabold select-all underline">{simulatedCode}</b>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-gray-500 dark:text-slate-400 leading-normal">
+                    Please trigger code dispatch to verify ownership of your Gmail account securely before finalizing authorization.
+                  </p>
+                )}
               </div>
             )}
 

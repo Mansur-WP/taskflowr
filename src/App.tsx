@@ -31,6 +31,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [currentTab, setCurrentTab] = useState('dashboard');
+  const [activeProjectFilter, setActiveProjectFilter] = useState('all');
   const [darkMode, setDarkMode] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -38,6 +39,23 @@ export default function App() {
   // Global Toast Lists
   const [toasts, setToasts] = useState<ToastAlert[]>([]);
   const [selectedTaskForDetail, setSelectedTaskForDetail] = useState<Task | null>(null);
+
+  // Preference state for auto-deleting completed tasks when all tasks are complete
+  const [autoDeleteOnFinish, setAutoDeleteOnFinish] = useState(() => {
+    return localStorage.getItem('auto_delete_on_finish') === 'true';
+  });
+
+  const toggleAutoDeleteOnFinish = () => {
+    const nextVal = !autoDeleteOnFinish;
+    setAutoDeleteOnFinish(nextVal);
+    localStorage.setItem('auto_delete_on_finish', String(nextVal));
+    triggerToast(
+      nextVal 
+        ? 'Auto-delete on finish all enabled! Compiling tasks will auto-wash them.' 
+        : 'Auto-delete on finish all disabled.', 
+      'info'
+    );
+  };
 
   const triggerToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Math.random().toString(36).slice(2, 9);
@@ -244,6 +262,49 @@ export default function App() {
     }
   };
 
+  const handleTasksBulkDelete = async (type: 'completed' | 'all') => {
+    const previousTasks = [...tasks];
+    
+    // Optimistic UI update
+    if (type === 'all') {
+      setTasks([]);
+    } else {
+      setTasks((prev) => prev.filter(t => !t.completed));
+    }
+
+    try {
+      const queryParam = type === 'all' ? 'all=true' : 'completed=true';
+      const r = await fetch(`/api/tasks?${queryParam}`, {
+        method: 'DELETE',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+      });
+      if (!r.ok) {
+        const errorData = await r.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Bulk delete operation failed');
+      }
+      triggerToast(
+        type === 'all' 
+          ? 'Successfully cleared all tasks.' 
+          : 'Successfully cleared completed tasks.', 
+        'success'
+      );
+    } catch (e: any) {
+      triggerToast(e.message || 'Failed to bulk delete.', 'error');
+      setTasks(previousTasks); // Rollback to precise local backup
+    }
+  };
+
+  // Auto-delete when all tasks are complete
+  useEffect(() => {
+    if (autoDeleteOnFinish && tasks.length > 0 && tasks.every((t) => t.completed)) {
+      const timer = setTimeout(() => {
+        triggerToast('All tasks completed! Auto-deleting all finished tasks as configured.', 'success');
+        handleTasksBulkDelete('all');
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [tasks, autoDeleteOnFinish]);
+
   const handleTasksReorder = async (ids: string[]) => {
     const previousTasks = [...tasks];
     // Local reorder sort algorithm mapping
@@ -302,12 +363,18 @@ export default function App() {
         return (
           <TaskListView
             tasks={tasks}
+            user={user!}
             onTaskCreate={handleTaskCreate}
             onTaskUpdate={handleTaskUpdate}
             onTaskDelete={handleTaskDelete}
             onTasksReorder={handleTasksReorder}
             toast={triggerToast}
             onTaskSelect={setSelectedTaskForDetail}
+            onBulkDelete={handleTasksBulkDelete}
+            autoDeleteOnFinish={autoDeleteOnFinish}
+            onToggleAutoDelete={toggleAutoDeleteOnFinish}
+            sidebarCategoryFilter={activeProjectFilter}
+            onSelectProject={setActiveProjectFilter}
           />
         );
       case 'focus':
@@ -397,6 +464,9 @@ export default function App() {
         toggleDarkMode={toggleDarkModeTheme}
         mobileOpen={mobileOpen}
         setMobileOpen={setMobileOpen}
+        tasks={tasks}
+        activeProject={activeProjectFilter}
+        onSelectProject={setActiveProjectFilter}
       />
 
       {/* Main dynamic viewport section */}

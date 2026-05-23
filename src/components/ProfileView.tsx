@@ -29,6 +29,12 @@ export default function ProfileView({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [profileColor, setProfileColor] = useState(user.profile_color || '#3b82f6');
 
+  // Gmail Verification States for password change
+  const [gmailCode, setGmailCode] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [simulatedCode, setSimulatedCode] = useState('');
+
   const colorPalette = [
     '#3b82f6', // blue
     '#10b981', // emerald
@@ -42,6 +48,31 @@ export default function ProfileView({
   const hasMinLength = password.length >= 6;
   const hasLetter = /[a-zA-Z]/.test(password);
   const hasNumber = /[0-9]/.test(password);
+
+  const sendGmailCode = async () => {
+    setSendingCode(true);
+    try {
+      const resp = await fetch('/api/auth/send-code', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({ email: user.email, purpose: 'change-password' })
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.error || 'Failed sending Gmail verification code.');
+      }
+      setCodeSent(true);
+      setSimulatedCode(data.code || '');
+      toast('Verification code sent to your registered Gmail address!', 'success');
+    } catch (err: any) {
+      toast(err.message || 'Error occurred sending code.', 'error');
+    } finally {
+      setSendingCode(false);
+    }
+  };
 
   const handleSubmitProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,6 +92,10 @@ export default function ProfileView({
         toast('Passwords do not match', 'error');
         return;
       }
+      if (!gmailCode) {
+        toast('Please request and enter your Gmail verification code to update password', 'error');
+        return;
+      }
     }
 
     setLoading(true);
@@ -74,7 +109,8 @@ export default function ProfileView({
         body: JSON.stringify({
           username: username.trim(),
           password: password ? password : undefined,
-          profile_color: profileColor
+          profile_color: profileColor,
+          code: password ? gmailCode : undefined
         })
       });
 
@@ -86,6 +122,9 @@ export default function ProfileView({
       onProfileUpdate(data.user);
       setPassword('');
       setConfirmPassword('');
+      setGmailCode('');
+      setCodeSent(false);
+      setSimulatedCode('');
       toast('Profile preferences successfully updated!', 'success');
     } catch (err: any) {
       toast(err.message || 'Error occurred updating profile', 'error');
@@ -202,19 +241,66 @@ export default function ProfileView({
           </div>
 
           {password.length > 0 && (
-            <div className="p-3 bg-white/10 dark:bg-black/15 border border-indigo-500/10 rounded-xl text-xs space-y-1">
-              <span className="font-semibold block text-gray-600 dark:text-gray-300">New Password Audit Checklist:</span>
-              <div className="flex items-center gap-2 text-gray-500">
-                {hasMinLength ? <Check className="w-3 h-3 text-emerald-500" /> : <div className="w-1 h-1 rounded-full bg-gray-400 mx-1 shrink-0" />}
-                <span className={hasMinLength ? 'text-emerald-600 line-through' : ''}>Min 6 characters</span>
+            <div className="space-y-4">
+              <div className="p-3 bg-white/10 dark:bg-black/15 border border-indigo-500/10 rounded-xl text-xs space-y-1">
+                <span className="font-semibold block text-gray-600 dark:text-gray-300">New Password Audit Checklist:</span>
+                <div className="flex items-center gap-2 text-gray-500">
+                  {hasMinLength ? <Check className="w-3 h-3 text-emerald-500" /> : <div className="w-1 h-1 rounded-full bg-gray-400 mx-1 shrink-0" />}
+                  <span className={hasMinLength ? 'text-emerald-600 line-through' : ''}>Min 6 characters</span>
+                </div>
+                <div className="flex items-center gap-2 text-gray-500">
+                  {hasLetter ? <Check className="w-3 h-3 text-emerald-500" /> : <div className="w-1 h-1 rounded-full bg-gray-400 mx-1 shrink-0" />}
+                  <span className={hasLetter ? 'text-emerald-600 line-through' : ''}>Requires letters</span>
+                </div>
+                <div className="flex items-center gap-2 text-gray-500">
+                  {hasNumber ? <Check className="w-3 h-3 text-emerald-500" /> : <div className="w-1 h-1 rounded-full bg-gray-400 mx-1 shrink-0" />}
+                  <span className={hasNumber ? 'text-emerald-600 line-through' : ''}>Requires numbers</span>
+                </div>
               </div>
-              <div className="flex items-center gap-2 text-gray-500">
-                {hasLetter ? <Check className="w-3 h-3 text-emerald-500" /> : <div className="w-1 h-1 rounded-full bg-gray-400 mx-1 shrink-0" />}
-                <span className={hasLetter ? 'text-emerald-600 line-through' : ''}>Requires letters</span>
-              </div>
-              <div className="flex items-center gap-2 text-gray-500">
-                {hasNumber ? <Check className="w-3 h-3 text-emerald-500" /> : <div className="w-1 h-1 rounded-full bg-gray-400 mx-1 shrink-0" />}
-                <span className={hasNumber ? 'text-emerald-600 line-through' : ''}>Requires numbers</span>
+
+              {/* Password change verification */}
+              <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-500/15 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="block text-[11px] font-bold text-gray-500 dark:text-slate-400 uppercase tracking-widest font-mono">
+                    Gmail Ownership Verification
+                  </span>
+                  <button
+                    type="button"
+                    disabled={sendingCode}
+                    onClick={sendGmailCode}
+                    className="text-[10px] font-extrabold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider hover:underline transition select-none disabled:opacity-50 cursor-pointer"
+                  >
+                    {sendingCode ? 'Dispatching...' : codeSent ? 'Resend Code' : 'Send Code'}
+                  </button>
+                </div>
+
+                {codeSent ? (
+                  <div className="space-y-2">
+                    <p className="text-[10px] text-gray-500 dark:text-slate-400 leading-relaxed">
+                      We simulated sending a 6-digit verification code to your verified email: <b>{user.email}</b>.
+                    </p>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      required
+                      value={gmailCode}
+                      onChange={(e) => setGmailCode(e.target.value.replace(/\D/g, ''))}
+                      className="w-full tracking-[0.25em] text-center py-2 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-black/40 text-gray-900 dark:text-white text-base font-bold focus:outline-none focus:border-indigo-500"
+                      placeholder="000000"
+                    />
+                    
+                    {simulatedCode && (
+                      <div className="p-2.5 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/5 border border-emerald-500/20 text-center text-[11px] font-semibold text-emerald-650 dark:text-emerald-400 flex items-center justify-center gap-1.5 animate-pulse">
+                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        Simulated Gmail Alert: Code is <b className="font-extrabold select-all underline">{simulatedCode}</b>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-gray-500 dark:text-slate-400 leading-normal">
+                    You must request and enter a Gmail verification code to successfully authorize any password modifications.
+                  </p>
+                )}
               </div>
             </div>
           )}

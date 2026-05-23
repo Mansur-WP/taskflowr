@@ -7,11 +7,23 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-accent-lime: #06b6d4;
+  --color-accent-purple: #8b5cf6;
+  --color-brand-indigo: #6366f1;
+  --color-brand-cyan: #06b6d4;
+  --color-brand-purple: #8b5cf6;
+  --color-brand-navy: #11053b;
+}
+
+:root {
+  --accent-lime: #06b6d4;
+  --accent-purple: #8b5cf6;
 }
 
 /* Base Body Layout */
 body {
-  background: radial-gradient(circle at top left, #f5f7fc 0%, #f9fbfd 50%, #f4f6fb 100%);
+  background: radial-gradient(circle at top left, #f4f3fb 0%, #fbfbfd 50%, #f0f2fb 100%);
   background-attachment: fixed;
   color: #0f172a;
   min-height: 100vh;
@@ -19,7 +31,7 @@ body {
 }
 
 .dark body {
-  background: radial-gradient(circle at top left, #08090f 0%, #0d0e14 60%, #06070a 100%);
+  background: radial-gradient(circle at top left, #0e092b 0%, #08051a 60%, #03020c 100%);
   background-attachment: fixed;
   color: #f1f5f9;
 }
@@ -56,24 +68,24 @@ h1, h2, h3, h4, th, .font-display {
 
 /* Clear, Bold, Modern Cards (Dark Mode) */
 .dark .glass-panel {
-  background-color: #12131b;
-  border: 1px solid #20222f;
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  background-color: #110b2bd9;
+  border: 1px solid #1e1744;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
 }
 
 /* Glass-Panel Interactive (Dark Mode) */
 .dark .glass-panel-interactive:hover {
   transform: translateY(-2px);
-  background-color: #161723;
-  border-color: #2e3146;
-  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.8), 0 0 15px 0 rgba(99, 102, 241, 0.04);
+  background-color: #170f3b;
+  border-color: #2b2160;
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7), 0 0 18px 0 rgba(139, 92, 246, 0.08);
 }
 
 /* Heavy Sidebars (Dark Mode) */
 .dark .glass-panel-heavy {
-  background-color: #0c0d13;
-  border-right: 1px solid #1c1d27;
-  box-shadow: 10px 0 30px -15px rgba(0, 0, 0, 0.7);
+  background-color: #09051d;
+  border-right: 1px solid #160e33;
+  box-shadow: 10px 0 30px -15px rgba(0, 0, 0, 0.6);
 }
 
 /* Custom, Slick scrollbar profiles */

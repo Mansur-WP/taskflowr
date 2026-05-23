@@ -11,6 +11,9 @@ const SESSION_SECRET = process.env.SESSION_SECRET || 'todo_app_secure_jwt_sessio
 
 app.use(express.json());
 
+// Temp cache for active Gmail verification codes (email -> { code, expires })
+const verificationCodes = new Map<string, { code: string; expires: number }>();
+
 // Helper to parse cookies
 function parseCookies(cookieHeader?: string) {
   const cookies: Record<string, string> = {};
@@ -144,12 +147,43 @@ app.get('/api/auth/me', (req, res) => {
   });
 });
 
+// Send Gmail verification code
+app.post('/api/auth/send-code', (req, res) => {
+  const { email, purpose } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required to dispatch verification code.' });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  
+  if (purpose === 'register' && db.getUserByEmail(normalizedEmail)) {
+    return res.status(400).json({ error: 'This email is already registered.' });
+  }
+
+  // Generate a 6-digit verification code
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  
+  // Store code with 10 min expiry
+  verificationCodes.set(normalizedEmail, {
+    code,
+    expires: Date.now() + 10 * 60 * 1000
+  });
+
+  console.log(`[Gmail Simulation] Verification code for ${normalizedEmail}: ${code}`);
+  
+  return res.json({ 
+    success: true, 
+    code,
+    message: `A 6-digit GMail verification code was dispatched to ${normalizedEmail} (simulated)`
+  });
+});
+
 // AUTH: Register
 app.post('/api/auth/register', (req, res) => {
-  const { username, email, password } = req.body;
+  const { username, email, password, code } = req.body;
 
-  if (!username || !email || !password) {
-    return res.status(400).json({ error: 'All fields (username, email, password) are required.' });
+  if (!username || !email || !password || !code) {
+    return res.status(400).json({ error: 'All fields (username, email, password, verification code) are required.' });
   }
 
   if (username.length < 3) {
@@ -159,6 +193,20 @@ app.post('/api/auth/register', (req, res) => {
   if (password.length < 6) {
     return res.status(400).json({ error: 'Password must be at least 6 characters.' });
   }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  // Validate Gmail verification code
+  const record = verificationCodes.get(normalizedEmail);
+  if (!record) {
+    return res.status(400).json({ error: 'Please request a Gmail verification code first.' });
+  }
+  if (record.code !== code.trim() || Date.now() > record.expires) {
+    return res.status(400).json({ error: 'Invalid or expired Gmail verification code.' });
+  }
+
+  // Clear code
+  verificationCodes.delete(normalizedEmail);
 
   if (db.getUserByEmail(email)) {
     return res.status(400).json({ error: 'This email is already registered.' });
@@ -240,7 +288,7 @@ app.post('/api/auth/logout', (req, res) => {
 // UPDATE PROFILE
 app.put('/api/auth/profile', requireAuth, (req, res) => {
   const user = (req as any).user;
-  const { username, password, profile_color } = req.body;
+  const { username, password, profile_color, code } = req.body;
 
   const updates: any = {};
   if (username) {
@@ -258,6 +306,21 @@ app.put('/api/auth/profile', requireAuth, (req, res) => {
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters.' });
     }
+    
+    // Require Gmail Verification code for password changes!
+    if (!code) {
+      return res.status(400).json({ error: 'Gmail verification code is required to authorize password changes.' });
+    }
+    
+    const normalizedEmail = user.email.trim().toLowerCase();
+    const record = verificationCodes.get(normalizedEmail);
+    if (!record || record.code !== code.trim() || Date.now() > record.expires) {
+      return res.status(400).json({ error: 'Invalid or expired Gmail verification code.' });
+    }
+    
+    // Clear code
+    verificationCodes.delete(normalizedEmail);
+
     updates.password_hash = db.hashPassword(password);
   }
 
@@ -384,6 +447,28 @@ app.post('/api/tasks/reorder', requireAuth, (req, res) => {
 
   db.reorderTasks(user.id, ids);
   return res.json({ success: true, message: 'Ordering successfully updated.' });
+});
+
+// TASK: Bulk Delete
+app.delete('/api/tasks', requireAuth, (req, res) => {
+  const user = (req as any).user;
+  const { completed, all } = req.query;
+
+  if (all === 'true') {
+    db.deleteAllTasks(user.id);
+    return res.json({ 
+      success: true, 
+      message: 'Successfully deleted all tasks.'
+    });
+  } else if (completed === 'true') {
+    db.deleteCompletedTasks(user.id);
+    return res.json({ 
+      success: true, 
+      message: 'Successfully deleted completed tasks.'
+    });
+  } else {
+    return res.status(400).json({ error: 'Please specify ?completed=true or ?all=true' });
+  }
 });
 
 // TASK: Delete

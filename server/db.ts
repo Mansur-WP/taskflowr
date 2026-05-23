@@ -222,6 +222,26 @@ class DatabaseEngine {
     return deleted;
   }
 
+  public deleteCompletedTasks(userId: string): boolean {
+    const originalLength = this.schema.tasks.length;
+    this.schema.tasks = this.schema.tasks.filter(t => !(t.user_id === userId && t.completed));
+    const deleted = this.schema.tasks.length < originalLength;
+    if (deleted) {
+      this.save();
+    }
+    return deleted;
+  }
+
+  public deleteAllTasks(userId: string): boolean {
+    const originalLength = this.schema.tasks.length;
+    this.schema.tasks = this.schema.tasks.filter(t => t.user_id !== userId);
+    const deleted = this.schema.tasks.length < originalLength;
+    if (deleted) {
+      this.save();
+    }
+    return deleted;
+  }
+
   // Reorder task positions
   public reorderTasks(userId: string, taskIdsOrdered: string[]): boolean {
     const userTasks = this.getTasks(userId);

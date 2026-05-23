@@ -373,10 +373,8 @@ export default function TaskDetailModal({
             <button
               type="button"
               onClick={() => {
-                if (confirm('Delete this task?')) {
-                  onDelete(task.id);
-                  onClose();
-                }
+                onDelete(task.id);
+                onClose();
               }}
               className="px-4 py-2 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-xs text-rose-500 font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"
             >

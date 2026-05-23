@@ -141,13 +141,12 @@ export default function FocusTimerView({ tasks, toast }: FocusTimerViewProps) {
 
   const skipTimer = () => {
     setIsPlaying(false);
-    if (confirm('Are you sure you want to skip this cycle?')) {
-      if (mode === 'work') {
-        setMode('shortBreak');
-      } else {
-        setMode('work');
-      }
+    if (mode === 'work') {
+      setMode('shortBreak');
+    } else {
+      setMode('work');
     }
+    toast('Interval skipped successfully', 'info');
   };
 
   // Calculate percentages for gauges

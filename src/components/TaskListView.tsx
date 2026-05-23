@@ -1,722 +1,1337 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
   Plus, 
-  Tag, 
   Calendar, 
+  Tag, 
   Trash2, 
   Edit3, 
-  ChevronLeft, 
-  ChevronRight, 
   Check, 
   SlidersHorizontal,
-  LayoutGrid,
-  ListFilter,
-  Move,
   Clock,
   Briefcase,
-  ListTodo
+  ListTodo,
+  MoreVertical,
+  Flame,
+  AlertCircle,
+  FolderOpen,
+  CalendarDays,
+  User as UserIcon,
+  Sparkles,
+  Award,
+  ChevronRight,
+  UserCheck
 } from 'lucide-react';
-import { Task } from '../types.js';
-import { parseDescriptionAndSubtasks, serializeDescriptionAndSubtasks, Subtask } from '../utils/subtasks.js';
+import { Task, User } from '../types.js';
+import { 
+  parseTaskMetadata, 
+  serializeTaskMetadata, 
+  pushActivityLog, 
+  Subtask, 
+  ActivityLog, 
+  AssignedUser, 
+  TaskMetadata 
+} from '../utils/taskMeta.js';
 
 interface TaskListViewProps {
   tasks: Task[];
+  user: User;
   onTaskCreate: (taskData: Omit<Task, 'id' | 'created_at' | 'user_id' | 'position'>) => Promise<boolean>;
   onTaskUpdate: (id: string, updates: Partial<Task>) => void;
   onTaskDelete: (id: string) => void;
   onTasksReorder: (ids: string[]) => void;
   toast: (msg: string, type: 'success' | 'error' | 'info') => void;
   onTaskSelect?: (task: Task) => void;
+  onBulkDelete?: (type: 'completed' | 'all') => void;
+  autoDeleteOnFinish?: boolean;
+  onToggleAutoDelete?: () => void;
+  sidebarCategoryFilter?: string;
+  onSelectProject?: (project: string) => void;
 }
 
 export default function TaskListView({
   tasks,
+  user,
   onTaskCreate,
   onTaskUpdate,
   onTaskDelete,
   onTasksReorder,
   toast,
-  onTaskSelect
+  onTaskSelect,
+  onBulkDelete,
+  autoDeleteOnFinish = false,
+  onToggleAutoDelete,
+  sidebarCategoryFilter = 'all',
+  onSelectProject
 }: TaskListViewProps) {
-  // Queries & Filters
-  const [search, setSearch] = useState('');
-  const [priorityFilter, setPriorityFilter] = useState<string>('all');
-  const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [completedFilter, setCompletedFilter] = useState<string>('all');
   
-  // Expanded checklists state and inline subtask inputs
-  const [expandedTaskIds, setExpandedTaskIds] = useState<Record<string, boolean>>({});
-  const [newSubtaskTexts, setNewSubtaskTexts] = useState<Record<string, string>>({});
-  
-  // Create Form State
-  const [isAdding, setIsAdding] = useState(false);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
-  const [category, setCategory] = useState('Work');
-  const [dueDate, setDueDate] = useState('');
+  // Tab states for filters: 'all' | 'active' | 'high' | 'project'
+  const [filterTab, setFilterTab] = useState<'all' | 'active' | 'high' | 'project'>('all');
+  const [selectedProjectTab, setSelectedProjectTab] = useState<string>('all');
 
-  // Editing Task State
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editTitle, setEditTitle] = useState('');
-  const [editDesc, setEditDesc] = useState('');
-  const [editPriority, setEditPriority] = useState<'low' | 'medium' | 'high'>('medium');
-  const [editCategory, setEditCategory] = useState('');
-  const [editDueDate, setEditDueDate] = useState('');
+  // Search filter
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Pagination Elements
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 5;
+  // Selected Task for right-side inline details panel
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  // Synced selected task object derived from source tasks props
+  const activeTask = useMemo(() => {
+    return tasks.find(t => t.id === selectedTaskId) || null;
+  }, [tasks, selectedTaskId]);
+
+  // If sidebarCategoryFilter changes, sync selectedProjectTab
+  useEffect(() => {
+    if (sidebarCategoryFilter && sidebarCategoryFilter !== 'all') {
+      setFilterTab('project');
+      setSelectedProjectTab(sidebarCategoryFilter);
+    } else if (sidebarCategoryFilter === 'all') {
+      setFilterTab('all');
+    }
+  }, [sidebarCategoryFilter]);
+
+  // Today Date string ISO
+  const todayStr = useMemo(() => {
+    return new Date().toISOString().split('T')[0];
+  }, []);
+
+  // Calculate Streak locally to keep state updated
+  const streakCount = useMemo(() => {
+    const saved = localStorage.getItem('productivity_streak');
+    if (saved) return parseInt(saved, 10);
+    // Otherwise seed a default
+    localStorage.setItem('productivity_streak', '5');
+    return 5;
+  }, []);
+
+  // Increment streak in local storage or visual feed upon completion events
+  const triggerStreakJoy = () => {
+    const nextStreak = streakCount + 1;
+    localStorage.setItem('productivity_streak', String(nextStreak));
+  };
 
   // Extract list of all unique categories
-  const allCategories = Array.from(new Set(tasks.map((t) => t.category || 'General')));
+  const allCategories = useMemo(() => {
+    return Array.from(new Set(tasks.map((t) => t.category || 'Work'))).filter(Boolean);
+  }, [tasks]);
 
-  // Filter Tasks locally before showing
-  const filteredTasks = tasks.filter((t) => {
-    const matchesSearch = 
-      t.title.toLowerCase().includes(search.toLowerCase()) ||
-      t.description.toLowerCase().includes(search.toLowerCase());
-    
-    const matchesPriority = priorityFilter === 'all' || t.priority === priorityFilter;
-    const matchesCategory = categoryFilter === 'all' || t.category === categoryFilter;
-    
-    let matchesCompleted = true;
-    if (completedFilter === 'active') matchesCompleted = !t.completed;
-    if (completedFilter === 'completed') matchesCompleted = t.completed;
+  // Handle click-to-confirm bulk delete action elements
+  const [confirmClearCompleted, setConfirmClearCompleted] = useState(false);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
 
-    return matchesSearch && matchesPriority && matchesCategory && matchesCompleted;
-  });
+  // QUICK ADD FORWARD-BAR STATE
+  const [quickTitle, setQuickTitle] = useState('');
+  const [quickPriority, setQuickPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [quickCategory, setQuickCategory] = useState('Work');
+  const [quickDueDate, setQuickDueDate] = useState('');
 
-  // Pages calculations
-  const totalPages = Math.ceil(filteredTasks.length / pageSize) || 1;
-  const startIndex = (currentPage - 1) * pageSize;
-  const paginatedTasks = filteredTasks.slice(startIndex, startIndex + pageSize);
+  // Dropdown UI toggles in Quick-Add Bar
+  const [showPriorityDrop, setShowPriorityDrop] = useState(false);
+  const [showCategoryDrop, setShowCategoryDrop] = useState(false);
+  const [showDateDrop, setShowDateDrop] = useState(false);
 
-  const handleCreateTaskSubmit = async (e: React.FormEvent) => {
+  // Inline details panel custom inputs
+  const [newSubtaskText, setNewSubtaskText] = useState('');
+  const [showAssigneeDrop, setShowAssigneeDrop] = useState(false);
+
+  // Inline editing mode for selected tasks
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editTitleBuffer, setEditTitleBuffer] = useState('');
+
+  // Dynamic assignee - restricted only to your logged in account details and data
+  const presetAssignees: AssignedUser[] = [
+    { username: `${user.username} (You)`, profileColor: user.profile_color || '#8b5cf6', email: user.email }
+  ];
+
+  // Primary filtering logic
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((t) => {
+      // Search text matches
+      const matchesSearch = 
+        t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (t.description && t.description.toLowerCase().includes(searchQuery.toLowerCase()));
+
+      if (!matchesSearch) return false;
+
+      // Tab Filters
+      if (filterTab === 'active') {
+        return !t.completed;
+      }
+      if (filterTab === 'high') {
+        return t.priority === 'high';
+      }
+      if (filterTab === 'project') {
+        if (selectedProjectTab === 'all') return true;
+        return t.category === selectedProjectTab;
+      }
+
+      return true;
+    });
+  }, [tasks, filterTab, selectedProjectTab, searchQuery]);
+
+  // Divide into Today section and Overdue section & Backlog/Later section
+  const categorizedTasks = useMemo(() => {
+    const overdue: Task[] = [];
+    const todayTasks: Task[] = [];
+    const later: Task[] = [];
+    const completed: Task[] = [];
+
+    filteredTasks.forEach((t) => {
+      if (t.completed) {
+        completed.push(t);
+      } else if (t.due_date && t.due_date < todayStr) {
+        overdue.push(t);
+      } else if (t.due_date === todayStr || !t.due_date) {
+        todayTasks.push(t);
+      } else {
+        later.push(t);
+      }
+    });
+
+    return { overdue, todayTasks, later, completed };
+  }, [filteredTasks, todayStr]);
+
+  // Overall metrics calculation
+  const stats = useMemo(() => {
+    const total = tasks.length;
+    const completed = tasks.filter(t => t.completed).length;
+    const inProgress = tasks.filter(t => !t.completed).length;
+    const overdue = tasks.filter(t => !t.completed && t.due_date && t.due_date < todayStr).length;
+    return { total, completed, inProgress, overdue };
+  }, [tasks, todayStr]);
+
+  // Handle Quick Add Submit
+  const handleQuickAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!quickTitle.trim()) return;
+
+    // Create default activity logs
+    const initialActivity: ActivityLog[] = [
+      {
+        id: Math.random().toString(36).slice(2, 9),
+        text: 'Task initialized via Workspace Fast-Add',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ];
+
+    const initialMeta: TaskMetadata = {
+      description: '',
+      subtasks: [],
+      assigned: null,
+      activity: initialActivity
+    };
 
     const success = await onTaskCreate({
-      title: title.trim(),
-      description: description.trim(),
-      priority,
-      category: category.trim() || 'General',
-      due_date: dueDate,
+      title: quickTitle.trim(),
+      description: serializeTaskMetadata(initialMeta),
+      priority: quickPriority,
+      category: quickCategory,
+      due_date: quickDueDate,
       completed: false
     });
 
     if (success) {
-      // Reset Form
-      setTitle('');
-      setDescription('');
-      setPriority('medium');
-      setCategory('Work');
-      setDueDate('');
-      setIsAdding(false);
-      toast('Task created successfully!', 'success');
+      setQuickTitle('');
+      setQuickPriority('medium');
+      setQuickDueDate('');
+      setShowPriorityDrop(false);
+      setShowCategoryDrop(false);
+      setShowDateDrop(false);
+      toast(`Quick-queued task card!`, 'success');
     }
   };
 
-  const startEdit = (t: Task) => {
-    setEditingId(t.id);
-    setEditTitle(t.title);
-    const { description: plainDesc } = parseDescriptionAndSubtasks(t.description || '');
-    setEditDesc(plainDesc);
-    setEditPriority(t.priority);
-    setEditCategory(t.category);
-    setEditDueDate(t.due_date || '');
-  };
+  // Toggle checklist status in inline details panel
+  const handleToggleSubtask = (subId: string, currentVal: boolean) => {
+    if (!activeTask) return;
+    const meta = parseTaskMetadata(activeTask.description || '');
+    
+    const updatedSubtasks = meta.subtasks.map(s => 
+      s.id === subId ? { ...s, completed: !currentVal } : s
+    );
 
-  const handleSaveEdit = (e: React.FormEvent, id: string) => {
-    e.preventDefault();
-    if (!editTitle.trim()) return;
+    const updatedActivity = pushActivityLog(
+      meta.activity,
+      `Checklist item: "${meta.subtasks.find(s => s.id === subId)?.text.slice(0, 15)}..." marked ${!currentVal ? 'completed' : 'reopened'}`
+    );
 
-    // Preserve existing subtasks when saving description alterations
-    const originalTask = tasks.find(item => item.id === id);
-    const { subtasks } = parseDescriptionAndSubtasks(originalTask?.description || '');
-
-    onTaskUpdate(id, {
-      title: editTitle.trim(),
-      description: serializeDescriptionAndSubtasks(editDesc.trim(), subtasks),
-      priority: editPriority,
-      category: editCategory.trim() || 'General',
-      due_date: editDueDate,
+    const newDescription = serializeTaskMetadata({
+      ...meta,
+      subtasks: updatedSubtasks,
+      activity: updatedActivity
     });
 
-    setEditingId(null);
-    toast('Task changes saved!', 'success');
+    onTaskUpdate(activeTask.id, { description: newDescription });
+    toast(!currentVal ? 'Checklist checkpoint ticked!' : 'Checkpoint reopened', 'info');
   };
 
-  // -----------------------------------------------------------------
-  // Drag & Drop HTML5 Handlers for Reordering
-  // -----------------------------------------------------------------
-  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
-
-  const handleDragStart = (e: React.DragEvent, id: string) => {
-    setDraggedTaskId(id);
-    e.dataTransfer.effectAllowed = 'move';
-    // Use dynamic transparency class
-    e.currentTarget.classList.add('opacity-30');
-  };
-
-  const handleDragEnd = (e: React.DragEvent) => {
-    e.currentTarget.classList.remove('opacity-30');
-    setDraggedTaskId(null);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
+  // Add subtask in inline details panel
+  const handleAddSubtask = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!activeTask || !newSubtaskText.trim()) return;
+
+    const meta = parseTaskMetadata(activeTask.description || '');
+    const newSub: Subtask = {
+      id: Math.random().toString(36).slice(2, 9),
+      text: newSubtaskText.trim(),
+      completed: false
+    };
+
+    const updatedSubtasks = [...meta.subtasks, newSub];
+    const updatedActivity = pushActivityLog(meta.activity, `Checklist item added: "${newSub.text.slice(0, 20)}"`);
+
+    const newDescription = serializeTaskMetadata({
+      ...meta,
+      subtasks: updatedSubtasks,
+      activity: updatedActivity
+    });
+
+    onTaskUpdate(activeTask.id, { description: newDescription });
+    setNewSubtaskText('');
+    toast('Checklist checkpoint queued!', 'success');
   };
 
-  const handleDrop = (e: React.DragEvent, targetId: string) => {
-    e.preventDefault();
-    if (!draggedTaskId || draggedTaskId === targetId) return;
+  // Change assignee inside details panel
+  const handleChangeAssignee = (user: AssignedUser | null) => {
+    if (!activeTask) return;
+    const meta = parseTaskMetadata(activeTask.description || '');
 
-    // Rearrange overall list
-    const originalIds = tasks.map((t) => t.id);
-    const fromIndex = originalIds.indexOf(draggedTaskId);
-    const toIndex = originalIds.indexOf(targetId);
+    const updatedActivity = pushActivityLog(
+      meta.activity,
+      user ? `Assigned task to ${user.username}` : 'Removed assignee from task'
+    );
 
-    if (fromIndex !== -1 && toIndex !== -1) {
-      const updatedIds = [...originalIds];
-      // remove from old sequence, insert under new target
-      const [removed] = updatedIds.splice(fromIndex, 1);
-      updatedIds.splice(toIndex, 0, removed);
+    const newDescription = serializeTaskMetadata({
+      ...meta,
+      assigned: user,
+      activity: updatedActivity
+    });
 
-      onTasksReorder(updatedIds);
-      toast('Tasks ordering rearranged', 'info');
-    }
+    onTaskUpdate(activeTask.id, { description: newDescription });
+    setShowAssigneeDrop(false);
+    toast(user ? `Assigned to ${user.username}` : 'Unassigned', 'info');
   };
 
-  const getPriorityBadgeClass = (p: string) => {
-    switch (p) {
-      case 'high': return 'bg-rose-500/10 text-rose-600 dark:bg-rose-500/5 dark:text-rose-400 border border-rose-200/50 dark:border-rose-900/30 font-semibold';
-      case 'medium': return 'bg-amber-500/10 text-amber-600 dark:bg-amber-500/5 dark:text-amber-400 border border-amber-200/50 dark:border-amber-900/30 font-semibold';
-      default: return 'bg-indigo-500/10 text-indigo-600 dark:bg-indigo-500/5 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-900/30 font-semibold';
-    }
+  // Edit details inside panel
+  const handleInlineTitleSave = () => {
+    if (!activeTask || !editTitleBuffer.trim()) return;
+    const meta = parseTaskMetadata(activeTask.description || '');
+
+    const updatedActivity = pushActivityLog(
+      meta.activity,
+      `Renamed task to "${editTitleBuffer.trim()}"`
+    );
+
+    const newDescription = serializeTaskMetadata({
+      ...meta,
+      activity: updatedActivity
+    });
+
+    onTaskUpdate(activeTask.id, { 
+      title: editTitleBuffer.trim(),
+      description: newDescription
+    });
+    setIsEditingTitle(false);
+    toast('Task renamed', 'success');
+  };
+
+  // Interactive detail toggle events
+  const handleFieldChange = (field: 'priority' | 'due_date' | 'category', value: string) => {
+    if (!activeTask) return;
+    const meta = parseTaskMetadata(activeTask.description || '');
+
+    const formattedLabel = field.replace('_', ' ').toUpperCase();
+    const updatedActivity = pushActivityLog(
+      meta.activity,
+      `Updated ${formattedLabel} to "${value}"`
+    );
+
+    const newDescription = serializeTaskMetadata({
+      ...meta,
+      activity: updatedActivity
+    });
+
+    onTaskUpdate(activeTask.id, { 
+      [field]: value,
+      description: newDescription
+    });
+    
+    toast(`Task ${formattedLabel} updated`, 'success');
+  };
+
+  // Delete checklist item
+  const handleDeleteChecklistSubtask = (subId: string) => {
+    if (!activeTask) return;
+    const meta = parseTaskMetadata(activeTask.description || '');
+    const item = meta.subtasks.find(s => s.id === subId);
+    if (!item) return;
+
+    const updatedSubtasks = meta.subtasks.filter(s => s.id !== subId);
+    const updatedActivity = pushActivityLog(meta.activity, `Deleted checklist item: "${item.text.slice(0, 15)}"`);
+
+    const newDescription = serializeTaskMetadata({
+      ...meta,
+      subtasks: updatedSubtasks,
+      activity: updatedActivity
+    });
+
+    onTaskUpdate(activeTask.id, { description: newDescription });
+    toast('Checklist item removed', 'info');
   };
 
   return (
     <div className="space-y-6">
-      {/* Search and Filters Strip */}
-      <div className="glass-panel p-5 rounded-2xl space-y-4 shadow-md">
-        <div className="flex flex-col md:flex-row gap-3">
-          {/* Query Input */}
-          <div className="relative flex-grow">
-            <Search className="absolute left-3.5 top-3 w-4 h-4 text-indigo-400 dark:text-slate-500" />
+      
+      {/* 1. STATS ROW AT THE TOP */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { 
+            title: 'Completed', 
+            val: stats.completed, 
+            caption: 'Tackled tasks',
+            color: 'text-emerald-400',
+            bg: 'bg-emerald-500/10 border-emerald-500/15'
+          },
+          { 
+            title: 'In Progress', 
+            val: stats.inProgress, 
+            caption: 'Active focus queue',
+            color: 'text-[#6366f1]',
+            bg: 'bg-[#6366f1]/10 border-[#6366f1]/15'
+          },
+          { 
+            title: 'Overdue', 
+            val: stats.overdue, 
+            caption: 'Immediate priority',
+            color: 'text-rose-500',
+            bg: 'bg-rose-500/10 border-rose-500/15'
+          },
+          { 
+            title: 'Streak', 
+            val: `${streakCount} days`, 
+            caption: 'Daily record burner',
+            color: 'text-[#3b82f6]',
+            bg: 'bg-[#3b82f6]/10 border-[#3b82f6]/15',
+            icon: true
+          }
+        ].map((item, idx) => (
+          <div 
+            key={idx} 
+            className={`border rounded-2xl p-4 flex flex-col justify-between shadow-sm relative overflow-hidden backdrop-blur-md transition-all hover:scale-[1.01] ${item.bg}`}
+          >
+            <span className="text-[10px] uppercase font-bold text-gray-400 dark:text-slate-400 tracking-widest font-mono">
+              {item.title}
+            </span>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className={`text-2xl sm:text-3.5xl font-extrabold tracking-tight font-display ${item.color}`}>
+                {item.val}
+              </span>
+              {item.icon && <Flame className="w-5 h-5 text-amber-500 animate-bounce shrink-0 mt-1" />}
+            </div>
+            <span className="text-[10px] text-gray-500 dark:text-slate-500 font-semibold mt-1">
+              {item.caption}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* SPLIT LAYOUT WORKSPACE FOR INLINE DETAILED FLOW */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        
+        {/* LEFT COLUMN: FILTERS, QUICK ADD & TODAY SECTIONS (Col span 7) */}
+        <div className="lg:col-span-7 space-y-6">
+          
+          {/* FILTER TAB SELECTORS */}
+          <div className="flex flex-wrap items-center justify-between border-b border-slate-200 dark:border-white/10 pb-4 gap-3 bg-white/40 dark:bg-black/10 p-3 rounded-2xl backdrop-blur-md">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { id: 'all', label: 'All Tasks', total: tasks.length },
+                { id: 'active', label: 'Active', total: tasks.filter(t => !t.completed).length },
+                { id: 'high', label: 'High Priority', total: tasks.filter(t => t.priority === 'high').length },
+                { id: 'project', label: 'Projects', total: allCategories.length }
+              ].map((tab) => {
+                const isActive = filterTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      setFilterTab(tab.id as any);
+                      if (tab.id === 'project' && selectedProjectTab === 'all' && allCategories.length > 0) {
+                        setSelectedProjectTab(allCategories[0]);
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                      isActive 
+                        ? 'bg-gradient-to-r from-[#8b5cf6] to-[#06b6d4] text-white shadow-md shadow-[#8b5cf6]/20' 
+                        : 'hover:bg-slate-100 dark:hover:bg-white/5 text-gray-500 dark:text-slate-400 hover:text-gray-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-mono font-black ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-white/10 text-gray-500 dark:text-slate-500'
+                    }`}>
+                      {tab.total}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* If Project select filter tab is activated */}
+            {filterTab === 'project' && allCategories.length > 0 && (
+              <div className="flex items-center gap-1">
+                <FolderOpen className="w-3.5 h-3.5 text-[#6366f1] dark:text-[#3b82f6]" />
+                <select
+                  value={selectedProjectTab}
+                  onChange={(e) => {
+                    setSelectedProjectTab(e.target.value);
+                    if (onSelectProject) onSelectProject(e.target.value);
+                  }}
+                  className="bg-transparent text-xs font-bold text-gray-800 dark:text-gray-200 focus:outline-none cursor-pointer border-none"
+                >
+                  <option value="all" className="dark:bg-[#0c0d12]">Any Project</option>
+                  {allCategories.map(cat => (
+                    <option key={cat} value={cat} className="dark:bg-[#0c0d12]">{cat}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Direct bulk clear action inline popup */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setConfirmClearCompleted(!confirmClearCompleted)}
+                title="Flush completed"
+                className="p-1.5 bg-slate-100 dark:bg-white/5 rounded-lg text-slate-400 hover:text-amber-500 dark:hover:text-[#3b82f6] transition cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Confirm box overlays rendering */}
+          {confirmClearCompleted && (
+            <motion.div 
+              initial={{ opacity: 0, y: -5 }} 
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-2xl flex items-center justify-between gap-3 text-xs"
+            >
+              <div className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400 font-semibold">
+                <AlertCircle className="w-4 h-4" />
+                <span>Confirm wiping all COMPLETED items? This action is permanent.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    onBulkDelete?.('completed');
+                    setConfirmClearCompleted(false);
+                    toast('Completed tasks cleared', 'success');
+                  }}
+                  className="px-2.5 py-1 bg-amber-600 font-bold hover:bg-amber-700 text-white rounded-lg transition"
+                >
+                  Clear Completed
+                </button>
+                <button
+                  onClick={() => setConfirmClearCompleted(false)}
+                  className="px-2.5 py-1 bg-slate-200 dark:bg-white/5 text-gray-700 dark:text-gray-300 rounded-lg transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* SEARCH BAR INTEGRATION */}
+          <div className="relative">
+            <Search className="absolute left-3.5 top-3 w-4 h-4 text-[#6366f1] dark:text-[#3b82f6]" />
             <input
               type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm rounded-xl border border-indigo-500/20 dark:border-white/10 bg-white/15 dark:bg-black/15 text-gray-900 dark:text-gray-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500/50"
-              placeholder="Search tasks by title, content descriptions..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 text-xs sm:text-sm rounded-xl border border-slate-200 dark:border-white/10 bg-white/50 dark:bg-[#0c0d12]/50 text-gray-900 dark:text-gray-100 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-[#6366f1]"
+              placeholder="Search active tasks list by text query..."
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Filter priority */}
-            <select
-              value={priorityFilter}
-              onChange={(e) => { setPriorityFilter(e.target.value); setCurrentPage(1); }}
-              className="px-3 py-2.5 text-xs rounded-xl bg-white/20 dark:bg-black/20 border border-indigo-500/20 dark:border-white/10 font-medium text-gray-700 dark:text-gray-300"
-            >
-              <option value="all" className="dark:bg-slate-900">All Priorities</option>
-              <option value="high" className="dark:bg-slate-900">High Priority</option>
-              <option value="medium" className="dark:bg-slate-900">Medium Priority</option>
-              <option value="low" className="dark:bg-slate-900">Low Priority</option>
-            </select>
-
-            {/* Filter category */}
-            <select
-              value={categoryFilter}
-              onChange={(e) => { setCategoryFilter(e.target.value); setCurrentPage(1); }}
-              className="px-3 py-2.5 text-xs rounded-xl bg-white/20 dark:bg-black/20 border border-indigo-500/20 dark:border-white/10 font-medium text-gray-700 dark:text-gray-300"
-            >
-              <option value="all" className="dark:bg-slate-900">All Categories</option>
-              {allCategories.map((cat) => (
-                <option key={cat} value={cat} className="dark:bg-slate-900">{cat}</option>
-              ))}
-            </select>
-
-            {/* Filter status */}
-            <select
-              value={completedFilter}
-              onChange={(e) => { setCompletedFilter(e.target.value); setCurrentPage(1); }}
-              className="px-3 py-2.5 text-xs rounded-xl bg-white/20 dark:bg-black/20 border border-indigo-500/20 dark:border-white/10 font-medium text-gray-700 dark:text-gray-300"
-            >
-              <option value="all" className="dark:bg-slate-900">Any Status</option>
-              <option value="active" className="dark:bg-slate-900">Active/Pending</option>
-              <option value="completed" className="dark:bg-slate-900">Completed</option>
-            </select>
-
-            {/* Creating task activation */}
-            <button
-              onClick={() => setIsAdding(!isAdding)}
-              className="px-4 py-2 bg-indigo-600 text-white font-semibold text-xs rounded-xl hover:bg-indigo-500 transition-all flex items-center gap-1.5 shadow-md shadow-indigo-500/20 hover:scale-[1.02] cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              New Task
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* CREATE TASK SLIDE PANEL */}
-      <AnimatePresence>
-        {isAdding && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
+          {/* 2. QUICK-ADD INTERACTIVE BAR */}
+          <form 
+            onSubmit={handleQuickAddSubmit} 
+            className="border border-slate-200 dark:border-white/10 rounded-2xl bg-white/60 dark:bg-[#0c0d12]/60 p-2 shadow-sm space-y-2 backdrop-blur-md relative"
           >
-            <form onSubmit={handleCreateTaskSubmit} className="glass-panel p-6 rounded-2xl shadow-lg border-indigo-500/10 space-y-4">
-              <div className="flex flex-col gap-1">
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Create New Task Card</h3>
-                <p className="text-[11px] text-gray-400">Fill details below to queue priority items</p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Title</label>
-                    <input
-                      type="text"
-                      required
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-white/10 dark:bg-black/15 border border-indigo-500/20 dark:border-white/10 text-gray-900 dark:text-gray-100 focus:outline-none"
-                      placeholder="e.g. Build API Endpoints"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Description</label>
-                    <textarea
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      rows={3}
-                      className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-white/10 dark:bg-black/15 border border-indigo-500/20 dark:border-white/10 text-gray-900 dark:text-gray-100 focus:outline-none"
-                      placeholder="Write description or task specs..."
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Priority</label>
-                      <select
-                        value={priority}
-                        onChange={(e: any) => setPriority(e.target.value)}
-                        className="w-full px-3 py-2.5 text-xs rounded-xl bg-white/20 dark:bg-black/20 border border-indigo-500/20 dark:border-white/10 font-medium text-gray-700 dark:text-gray-300"
-                      >
-                        <option value="low" className="dark:bg-slate-900">Low</option>
-                        <option value="medium" className="dark:bg-slate-900">Medium</option>
-                        <option value="high" className="dark:bg-slate-900">High</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Category / Tag</label>
-                      <input
-                        type="text"
-                        value={category}
-                        onChange={(e) => setCategory(e.target.value)}
-                        className="w-full px-3 py-2.5 text-xs rounded-xl bg-white/10 dark:bg-black/15 border border-indigo-500/20 dark:border-white/10 text-gray-900 dark:text-gray-100 focus:outline-none"
-                        placeholder="Work, Study, Shopping..."
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Due Date</label>
-                    <input
-                      type="date"
-                      value={dueDate}
-                      onChange={(e) => setDueDate(e.target.value)}
-                      className="w-full px-3 py-2.5 text-xs rounded-xl bg-white/10 dark:bg-black/15 border border-indigo-500/20 dark:border-white/10 text-gray-900 dark:text-gray-100 focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-3">
-                    <button
-                      type="button"
-                      onClick={() => setIsAdding(false)}
-                      className="px-4 py-2 bg-transparent hover:bg-white/20 dark:hover:bg-white/5 text-xs text-slate-500 hover:text-gray-900 dark:hover:text-white rounded-xl cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-4 py-2 bg-indigo-600 text-white text-xs font-semibold rounded-xl hover:bg-indigo-500 cursor-pointer shadow-md shadow-indigo-500/10"
-                    >
-                      Save Task Card
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </form>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* TASK LIST RENDER BOARD */}
-      {paginatedTasks.length === 0 ? (
-        <div className="glass-panel p-12 rounded-2xl text-center shadow-md">
-          <div className="w-16 h-16 bg-white/20 dark:bg-white/5 text-slate-400 dark:text-gray-500 flex items-center justify-center rounded-2xl mx-auto mb-4 font-bold text-2xl shadow-inner">
-            ∅
-          </div>
-          <p className="text-gray-950 dark:text-white font-semibold text-sm mb-1">No tasks queue matches filters</p>
-          <p className="text-xs text-gray-400 dark:text-slate-400 max-w-sm mx-auto">
-            Try resetting your search query or filters above, or create a brand new task item to catalog your schedule.
-          </p>
-          {search !== '' || priorityFilter !== 'all' || categoryFilter !== 'all' || completedFilter !== 'all' ? (
-            <button
-              onClick={() => {
-                setSearch('');
-                setPriorityFilter('all');
-                setCategoryFilter('all');
-                setCompletedFilter('all');
-              }}
-              className="mt-4 px-3.5 py-2 bg-white/20 dark:bg-white/10 hover:bg-white/30 border border-indigo-200/50 dark:border-white/10 rounded-xl text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:scale-[1.01] transition-all cursor-pointer"
-            >
-              Reset Filters
-            </button>
-          ) : null}
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {paginatedTasks.map((t) => {
-            const isEditing = editingId === t.id;
-            const { description: plainDesc, subtasks } = parseDescriptionAndSubtasks(t.description || '');
-            const totalSubtasks = subtasks.length;
-            const completedSubtasks = subtasks.filter((s) => s.completed).length;
-            const isExpanded = !!expandedTaskIds[t.id];
-
-            return (
-              <div
-                key={t.id}
-                draggable={!isEditing}
-                onDragStart={(e) => handleDragStart(e, t.id)}
-                onDragEnd={handleDragEnd}
-                onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(e, t.id)}
-                className={`glass-panel p-4.5 rounded-2xl shadow-sm flex items-start gap-4 transition-all duration-300 hover:scale-[1.005] hover:border-indigo-500/30 dark:hover:border-white/15 group ${
-                  t.completed ? 'opacity-60' : ''
-                }`}
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={quickTitle}
+                onChange={(e) => setQuickTitle(e.target.value)}
+                required
+                className="flex-grow bg-transparent text-xs sm:text-sm px-2 py-1.5 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-slate-500 focus:outline-none font-medium"
+                placeholder="Add task (e.g., Deliver design tomorrow #Work !high)"
+              />
+              <button
+                type="submit"
+                className="p-2 border border-[#8b5cf6]/20 bg-gradient-to-r from-[#8b5cf6] to-[#06b6d4] text-white rounded-xl hover:scale-[1.03] transition-transform flex items-center justify-center cursor-pointer shadow-md shadow-[#8b5cf6]/10 shrink-0"
               >
-                {/* Drag Grib handle on hover */}
-                <div className="hidden sm:flex self-center text-slate-400 dark:text-slate-500 cursor-grab active:cursor-grabbing hover:text-indigo-500 transition-colors focus:outline-none shrink-0">
-                  <Move className="w-4 h-4" />
-                </div>
+                <Plus className="w-4 h-4 stroke-[3px]" />
+              </button>
+            </div>
 
-                {/* Status custom checkbox */}
-                <div className="pt-0.5 shrink-0">
-                  <button
-                    onClick={() => onTaskChange(t, !t.completed)}
-                    className={`w-5 h-5 rounded-md border flex items-center justify-center transition cursor-pointer ${
-                      t.completed 
-                        ? 'bg-indigo-600 border-indigo-600 text-white' 
-                        : 'border-slate-350 dark:border-white/10 hover:border-indigo-500'
-                    }`}
-                  >
-                    {t.completed && <Check className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
-
-                {/* TASK TEXT OVERS / INLINE EDIT WRAPPERS */}
-                <div className="flex-grow min-w-0 pr-2">
-                  {isEditing ? (
-                    <form onSubmit={(e) => handleSaveEdit(e, t.id)} className="space-y-3 pt-1">
-                      <input
-                        type="text"
-                        required
-                        value={editTitle}
-                        onChange={(e) => setEditTitle(e.target.value)}
-                        className="w-full px-3 py-2 text-xs rounded-xl bg-white/10 dark:bg-black/15 border border-indigo-500/20 dark:border-white/10 text-gray-900 dark:text-gray-100 focus:outline-none"
-                      />
-                      <textarea
-                        value={editDesc}
-                        onChange={(e) => setEditDesc(e.target.value)}
-                        rows={2}
-                        className="w-full px-3 py-2 text-xs rounded-xl bg-white/10 dark:bg-black/15 border border-indigo-500/20 dark:border-white/10 text-gray-900 dark:text-gray-100 focus:outline-none"
-                      />
-                      <div className="grid grid-cols-3 gap-2">
-                        <select
-                          value={editPriority}
-                          onChange={(e: any) => setEditPriority(e.target.value)}
-                          className="px-2.5 py-1.5 text-[11px] rounded-lg bg-white/20 dark:bg-black/20 border border-indigo-500/20 dark:border-white/10 text-gray-700 dark:text-gray-300"
-                        >
-                          <option value="low" className="dark:bg-slate-900">Low Priority</option>
-                          <option value="medium" className="dark:bg-slate-900">Medium Priority</option>
-                          <option value="high" className="dark:bg-slate-900">High Priority</option>
-                        </select>
-                        <input
-                          type="text"
-                          value={editCategory}
-                          onChange={(e) => setEditCategory(e.target.value)}
-                          className="px-2.5 py-1.5 text-[11px] rounded-lg bg-white/10 dark:bg-black/15 border border-indigo-500/20 dark:border-white/10 text-gray-700 dark:text-gray-300 focus:outline-none"
-                          placeholder="Tag..."
-                        />
-                        <input
-                          type="date"
-                          value={editDueDate}
-                          onChange={(e) => setEditDueDate(e.target.value)}
-                          className="px-2.5 py-1.5 text-[11px] rounded-lg bg-white/10 dark:bg-black/15 border border-indigo-500/20 dark:border-white/10 text-gray-700 dark:text-gray-300 focus:outline-none"
-                        />
-                      </div>
-                      <div className="flex gap-2 justify-end pt-1">
-                        <button
-                          type="button"
-                          onClick={() => setEditingId(null)}
-                          className="px-3.5 py-1.5 text-[10px] bg-transparent text-gray-400 hover:text-gray-900 dark:hover:text-white transition rounded-xl cursor-pointer"
-                        >
-                          Discard
-                        </button>
-                        <button
-                          type="submit"
-                          className="px-3.5 py-1.5 text-[10px] bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-500 hover:scale-[1.01] shadow shadow-indigo-500/10 cursor-pointer"
-                        >
-                          Save Changes
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <div>
-                      {/* Meta titles */}
-                      <span 
-                        className={`block text-sm font-semibold text-gray-900 dark:text-gray-100 truncate ${
-                          t.completed ? 'line-through text-gray-400 dark:text-gray-500' : ''
-                        }`}
+            {/* META BUTTONS ROW */}
+            <div className="flex items-center gap-1.5 px-1 border-t border-slate-100 dark:border-white/5 pt-2 flex-wrap">
+              
+              {/* Priority Select Toggle */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPriorityDrop(!showPriorityDrop);
+                    setShowCategoryDrop(false);
+                    setShowDateDrop(false);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg border border-slate-200 dark:border-white/5 text-[10px] font-bold flex items-center gap-1 hover:bg-slate-50 dark:hover:bg-white/5 text-gray-500 dark:text-slate-400 ${
+                    quickPriority !== 'medium' ? 'text-[#6366f1] border-[#6366f1]/20 bg-[#6366f1]/5' : ''
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    quickPriority === 'high' ? 'bg-rose-500' : quickPriority === 'medium' ? 'bg-amber-500' : 'bg-slate-400'
+                  }`} />
+                  <span>Priority: {quickPriority.toUpperCase()}</span>
+                </button>
+                {showPriorityDrop && (
+                  <div className="absolute left-0 bottom-full mb-2 z-30 bg-white dark:bg-[#12131b] border border-slate-200 dark:border-white/10 p-1.5 rounded-xl shadow-xl flex flex-col gap-1 w-32">
+                    {['low', 'medium', 'high'].map(p => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => {
+                          setQuickPriority(p as any);
+                          setShowPriorityDrop(false);
+                        }}
+                        className="px-2 py-1.5 rounded-lg text-left text-[10px] uppercase font-bold text-gray-400 hover:text-white hover:bg-[#6366f1] transition"
                       >
-                        {t.title}
-                      </span>
-                      
-                      {plainDesc && (
-                        <p className={`text-xs text-gray-500 dark:text-slate-400 mt-1 pb-1 max-w-2xl text-justify break-all ${
-                          t.completed ? 'line-through text-gray-400/50' : ''
-                        }`}>
-                          {plainDesc}
-                        </p>
-                      )}
-
-                      {/* Subtasks checklist section styled exactly like modern TickTick */}
-                      <div className="mt-3.5 pt-2 border-t border-solid border-slate-100 dark:border-white/5 space-y-2 max-w-xl">
-                        {/* Summary bar / Toggle Checklist trigger */}
-                        <div className="flex items-center justify-between">
-                          <button
-                            type="button"
-                            onClick={() => setExpandedTaskIds(prev => ({ ...prev, [t.id]: !prev[t.id] }))}
-                            className={`text-[11px] font-bold hover:underline flex items-center gap-1.5 cursor-pointer ${
-                              totalSubtasks === 0 
-                                ? 'text-indigo-500 hover:text-indigo-600 dark:text-indigo-400' 
-                                : 'text-slate-600 dark:text-gray-300'
-                            }`}
-                          >
-                            <ListTodo className="w-3.5 h-3.5 text-indigo-500" />
-                            <span>
-                              {totalSubtasks === 0 
-                                ? '+ Add Checklist Item' 
-                                : `Checklist (${completedSubtasks}/${totalSubtasks} completed)`}
-                            </span>
-                          </button>
-                          
-                          {totalSubtasks > 0 && (
-                            <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold font-mono bg-indigo-500/10 px-2 py-0.5 rounded">
-                              {Math.round((completedSubtasks / totalSubtasks) * 100)}% done
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Expandable checklist container */}
-                        {isExpanded && (
-                          <div className="pl-2 pr-1.5 py-2.5 mt-2 bg-gray-50/50 dark:bg-black/20 rounded-xl border border-dashed border-indigo-500/15 dark:border-white/5 space-y-2.5 transition-all">
-                            {/* Render items list */}
-                            {subtasks.length === 0 ? (
-                              <p className="text-[10px] text-gray-400 italic pl-1">No items listed. Type below to add checklist items.</p>
-                            ) : (
-                              subtasks.map((st) => (
-                                <div key={st.id} className="flex items-center justify-between gap-2 group/item">
-                                  <div className="flex items-center gap-2.5 min-w-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const updated = subtasks.map(s => s.id === st.id ? { ...s, completed: !s.completed } : s);
-                                        onTaskUpdate(t.id, { description: serializeDescriptionAndSubtasks(plainDesc, updated) });
-                                        toast(st.completed ? `"${st.text}" reopened` : `Completed "${st.text}"`, 'success');
-                                      }}
-                                      className={`w-3.5 h-3.5 rounded-md border flex items-center justify-center transition shrink-0 cursor-pointer ${
-                                        st.completed
-                                          ? 'bg-emerald-500 border-emerald-500 text-white'
-                                          : 'border-slate-300 dark:border-white/10 hover:border-indigo-500'
-                                      }`}
-                                    >
-                                      {st.completed && <Check className="w-2 h-2" />}
-                                    </button>
-                                    <span className={`text-xs text-gray-800 dark:text-gray-200 select-none ${st.completed ? 'line-through text-gray-400 dark:text-gray-500' : 'font-medium'}`}>
-                                      {st.text}
-                                    </span>
-                                  </div>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const updated = subtasks.filter(s => s.id !== st.id);
-                                      onTaskUpdate(t.id, { description: serializeDescriptionAndSubtasks(plainDesc, updated) });
-                                      toast('Item deleted from checklist', 'info');
-                                    }}
-                                    className="text-[10px] text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover/item:opacity-100 pr-1 cursor-pointer"
-                                    title="Delete item"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ))
-                            )}
-
-                            {/* Inline creation field */}
-                            <form
-                              onSubmit={(e) => {
-                                e.preventDefault();
-                                const text = newSubtaskTexts[t.id] || '';
-                                if (!text.trim()) return;
-                                const newItem = { id: Math.random().toString(36).slice(2, 9), text: text.trim(), completed: false };
-                                const updated = [...subtasks, newItem];
-                                onTaskUpdate(t.id, { description: serializeDescriptionAndSubtasks(plainDesc, updated) });
-                                setNewSubtaskTexts(prev => ({ ...prev, [t.id]: '' }));
-                                toast(`Added checkbox item: "${text.slice(0, 15)}"`, 'success');
-                              }}
-                              className="flex items-center gap-1.5 pt-2 border-t border-solid border-slate-100 dark:border-white/5"
-                            >
-                              <input
-                                type="text"
-                                value={newSubtaskTexts[t.id] || ''}
-                                onChange={(e) => setNewSubtaskTexts(prev => ({ ...prev, [t.id]: e.target.value }))}
-                                placeholder="Add custom step / checklist item..."
-                                className="flex-grow bg-white dark:bg-black/10 border border-slate-200 dark:border-white/10 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 dark:text-gray-200 focus:outline-none focus:border-indigo-500/40"
-                              />
-                              <button
-                                type="submit"
-                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold shadow-sm transition hover:scale-105 active:scale-95 cursor-pointer"
-                              >
-                                Add
-                              </button>
-                            </form>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Info Pills */}
-                      <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                        {/* Priority Badge */}
-                        <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded border uppercase tracking-wider ${getPriorityBadgeClass(t.priority)}`}>
-                          {t.priority}
-                        </span>
-
-                        {/* Category Badge */}
-                        <span className="text-[9px] font-bold bg-white/20 border border-white/30 dark:bg-white/5 dark:border-white/5 text-gray-500 dark:text-gray-400 px-2 py-0.5 rounded flex items-center gap-1">
-                          <Tag className="w-2.5 h-2.5 shrink-0 text-indigo-400" />
-                          {t.category || 'General'}
-                        </span>
-
-                        {/* Due Date Indicator */}
-                        {t.due_date && (
-                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded flex items-center gap-1 ${
-                            isOverdue(t) 
-                              ? 'bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/30 font-semibold animate-pulse' 
-                              : 'bg-white/20 border border-white/30 dark:bg-white/5 dark:border-white/5 text-slate-500 dark:text-gray-400'
-                          }`}>
-                            <Calendar className="w-2.5 h-2.5 shrink-0" />
-                            {isOverdue(t) ? `Overdue: ${formatReadableDate(t.due_date)}` : `Due: ${formatReadableDate(t.due_date)}`}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* EDIT/DELETE ACTIONS */}
-                {!isEditing && (
-                  <div className="flex items-center gap-1.5 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity self-center shrink-0">
-                    <button
-                      onClick={() => onTaskSelect ? onTaskSelect(t) : startEdit(t)}
-                      title="Edit task parameters in detailed view"
-                      className="p-1.5 hover:bg-white/35 dark:hover:bg-white/5 rounded-lg text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-400 transition cursor-pointer"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm('Are you sure you want to delete this task?')) {
-                          onTaskDelete(t.id);
-                        }
-                      }}
-                      title="Delete task card"
-                      className="p-1.5 hover:bg-rose-50/50 dark:hover:bg-rose-950/30 rounded-lg text-slate-400 hover:text-rose-500 transition cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                        {p}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
-            );
-          })}
-        </div>
-      )}
 
-      {/* FOOTER PAGINATION BAR */}
-      {filteredTasks.length > pageSize && (
-        <div className="flex items-center justify-between pt-4 border-t border-white/25 dark:border-white/10 font-mono">
-          <span className="text-xs text-gray-455 dark:text-slate-400">
-            Page {currentPage} of {totalPages} ({filteredTasks.length} matches)
-          </span>
+              {/* Project Select Toggle */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCategoryDrop(!showCategoryDrop);
+                    setShowPriorityDrop(false);
+                    setShowDateDrop(false);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg border border-slate-200 dark:border-white/5 text-[10px] font-bold flex items-center gap-1 hover:bg-slate-50 dark:hover:bg-white/5 text-gray-500 dark:text-slate-400 ${
+                    quickCategory !== 'Work' ? 'text-[#6366f1] border-[#6366f1]/20 bg-[#6366f1]/5' : ''
+                  }`}
+                >
+                  <FolderOpen className="w-3 h-3 text-gray-400" />
+                  <span>Project: {quickCategory}</span>
+                </button>
+                {showCategoryDrop && (
+                  <div className="absolute left-0 bottom-full mb-2 z-30 bg-white dark:bg-[#12131b] border border-slate-200 dark:border-white/10 p-2 rounded-xl shadow-xl flex flex-col gap-1 w-44">
+                    <span className="text-[9px] text-gray-400 px-1 font-bold">SELECT OR ENTER:</span>
+                    <input
+                      type="text"
+                      value={quickCategory}
+                      onChange={(e) => setQuickCategory(e.target.value)}
+                      className="px-2 py-1 bg-black/10 dark:bg-black/25 text-[10px] border border-white/10 rounded-lg text-white mb-1"
+                      placeholder="Custom category..."
+                    />
+                    {['Work', 'Personal', 'Shopping', 'Health'].map(cat => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => {
+                          setQuickCategory(cat);
+                          setShowCategoryDrop(false);
+                        }}
+                        className="px-2 py-1 rounded-lg text-left text-[10px] text-gray-400 hover:text-white hover:bg-[#6366f1] transition"
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-          <div className="flex items-center gap-1.5">
-            <button
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-              className="p-1.5 border border-indigo-200/50 dark:border-white/10 bg-white/20 dark:bg-white/5 rounded-xl text-gray-600 dark:text-gray-300 hover:bg-white/45 dark:hover:bg-white/10 transition disabled:opacity-30 cursor-pointer"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-              className="p-1.5 border border-indigo-200/50 dark:border-white/10 bg-white/20 dark:bg-white/5 rounded-xl text-gray-600 dark:text-gray-300 hover:bg-white/45 dark:hover:bg-white/10 transition disabled:opacity-30 cursor-pointer"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
+              {/* Due Date Timer */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDateDrop(!showDateDrop);
+                    setShowPriorityDrop(false);
+                    setShowCategoryDrop(false);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg border border-slate-200 dark:border-white/5 text-[10px] font-bold flex items-center gap-1 hover:bg-slate-50 dark:hover:bg-white/5 text-gray-500 dark:text-slate-400 ${
+                    quickDueDate !== '' ? 'text-[#6366f1] border-[#6366f1]/20 bg-[#6366f1]/5' : ''
+                  }`}
+                >
+                  <Calendar className="w-3 h-3 text-gray-400" />
+                  <span>Due: {quickDueDate || 'None'}</span>
+                </button>
+                {showDateDrop && (
+                  <div className="absolute left-0 bottom-full mb-2 z-30 bg-white dark:bg-[#12131b] border border-slate-200 dark:border-white/10 p-2 rounded-xl shadow-xl flex flex-col gap-1 w-48">
+                    <input
+                      type="date"
+                      value={quickDueDate}
+                      onChange={(e) => setQuickDueDate(e.target.value)}
+                      className="px-2 py-1 bg-black/15 text-[10px] border border-white/10 rounded-lg text-white mb-2 font-mono"
+                    />
+                    <div className="flex gap-1.5 justify-end">
+                      <button
+                        type="button"
+                        onClick={() => { setQuickDueDate(todayStr); setShowDateDrop(false); }}
+                        className="text-[9px] px-1.5 py-1 bg-[#6366f1] text-white rounded font-bold"
+                      >
+                        Today
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setQuickDueDate(''); setShowDateDrop(false); }}
+                        className="text-[9px] px-1.5 py-1 bg-slate-200 dark:bg-white/5 text-gray-700 dark:text-gray-300 rounded font-bold"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </form>
+
+          {/* 3. CORE TASKS LIST WORKSPACE */}
+          <div className="space-y-6">
+
+            {/* OVERDUE SECTION (Flagged Red - glows & draws attention) */}
+            {categorizedTasks.overdue.length > 0 && (
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 block shrink-0 animate-ping" />
+                  <h3 className="text-xs font-black uppercase text-rose-500 tracking-wider font-display">
+                    Overdue ({categorizedTasks.overdue.length})
+                  </h3>
+                </div>
+                
+                <div className="space-y-2">
+                  {categorizedTasks.overdue.map(t => (
+                    <TaskCard 
+                      key={t.id} 
+                      task={t} 
+                      selectedTaskId={selectedTaskId}
+                      onSelect={() => setSelectedTaskId(t.id)}
+                      onTaskUpdate={onTaskUpdate}
+                      onTaskDelete={onTaskDelete}
+                      toast={toast}
+                      triggerStreakJoy={triggerStreakJoy}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* TODAY SECTION */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#3b82f6] block shrink-0" />
+                  <h3 className="text-xs font-black uppercase text-gray-800 dark:text-slate-300 tracking-wider font-display">
+                    Today / Focus List ({categorizedTasks.todayTasks.length})
+                  </h3>
+                </div>
+                <span className="text-[10px] text-gray-400 font-mono font-semibold">
+                  {new Date().toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                </span>
+              </div>
+
+              {categorizedTasks.todayTasks.length === 0 ? (
+                <div className="p-10 border border-dashed border-slate-200 dark:border-white/10 rounded-2xl text-center bg-transparent">
+                  <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-white/5 flex items-center justify-center mx-auto mb-2 text-gray-400">
+                    ✓
+                  </div>
+                  <p className="text-xs font-bold text-gray-500 dark:text-slate-400">All planned tasks for today completed!</p>
+                  <p className="text-[10px] text-gray-400 mt-1">Excellent work. Use the quick-add bar above to queue more items.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {categorizedTasks.todayTasks.map(t => (
+                    <TaskCard 
+                      key={t.id} 
+                      task={t} 
+                      selectedTaskId={selectedTaskId}
+                      onSelect={() => setSelectedTaskId(t.id)}
+                      onTaskUpdate={onTaskUpdate}
+                      onTaskDelete={onTaskDelete}
+                      toast={toast}
+                      triggerStreakJoy={triggerStreakJoy}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* LATER / BACKLOG SECTION */}
+            {categorizedTasks.later.length > 0 && (
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#6366f1] block shrink-0" />
+                  <h3 className="text-xs font-black uppercase text-gray-400 dark:text-slate-400 tracking-wider font-display">
+                    Later / Backlog ({categorizedTasks.later.length})
+                  </h3>
+                </div>
+
+                <div className="space-y-2">
+                  {categorizedTasks.later.map(t => (
+                    <TaskCard 
+                      key={t.id} 
+                      task={t} 
+                      selectedTaskId={selectedTaskId}
+                      onSelect={() => setSelectedTaskId(t.id)}
+                      onTaskUpdate={onTaskUpdate}
+                      onTaskDelete={onTaskDelete}
+                      toast={toast}
+                      triggerStreakJoy={triggerStreakJoy}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* COMPLETED SECTION */}
+            {categorizedTasks.completed.length > 0 && (
+              <div className="space-y-2.5 opacity-60">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black uppercase text-gray-400 dark:text-slate-500 tracking-wider font-display">
+                    Completed Archive ({categorizedTasks.completed.length})
+                  </h3>
+                </div>
+
+                <div className="space-y-2">
+                  {categorizedTasks.completed.map(t => (
+                    <TaskCard 
+                      key={t.id} 
+                      task={t} 
+                      selectedTaskId={selectedTaskId}
+                      onSelect={() => setSelectedTaskId(t.id)}
+                      onTaskUpdate={onTaskUpdate}
+                      onTaskDelete={onTaskDelete}
+                      toast={toast}
+                      triggerStreakJoy={triggerStreakJoy}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
           </div>
+
         </div>
-      )}
+
+        {/* 4. RIGHT-SIDE INLINE DETAIL PANEL (Col span 5 - highly advanced) */}
+        <div className="lg:col-span-5 h-full lg:sticky lg:top-4 bg-[#ffffff]/80 dark:bg-[#0c0d12]/90 border border-slate-200 dark:border-white/10 p-5 rounded-3xl shadow-lg shadow-black/20 backdrop-blur-xl">
+          <AnimatePresence mode="wait">
+            {!activeTask ? (
+              <motion.div 
+                key="empty-panel"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="flex flex-col items-center justify-center py-20 text-center space-y-3"
+              >
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-[#8b5cf6]/10 to-[#06b6d4]/10 dark:from-[#8b5cf6]/10 dark:to-[#06b6d4]/10 flex items-center justify-center border border-[#8b5cf6]/25">
+                  <Sparkles className="w-6 h-6 text-[#8b5cf6] dark:text-[#06b6d4] animate-spin-slow" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-gray-900 dark:text-white uppercase font-mono tracking-widest">
+                    Select a Task Card
+                  </h4>
+                  <p className="text-[10px] text-gray-400 dark:text-slate-500 max-w-xs mt-1 leading-normal font-semibold">
+                    Hover-reveal and click any card in your Today or Backlog feeds to view the full checklists, progress logs, assignee widgets, and core activity logs inline below!
+                  </p>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div 
+                key={activeTask.id}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-5"
+              >
+                {/* Task Title panel block */}
+                <div>
+                  <div className="flex items-center justify-between text-[11px] font-bold text-gray-400 mb-1">
+                    <span className="font-mono text-xs uppercase tracking-wider text-[#8b5cf6] dark:text-[#06b6d4]">
+                      Task Details Workspace
+                    </span>
+                    <button
+                      onClick={() => setSelectedTaskId(null)}
+                      className="px-2 py-0.5 rounded bg-slate-100 dark:bg-white/5 text-gray-400 hover:text-white transition font-mono"
+                    >
+                      ESC Close
+                    </button>
+                  </div>
+ 
+                  {isEditingTitle ? (
+                    <div className="flex items-center gap-2 mt-1">
+                      <input
+                        type="text"
+                        value={editTitleBuffer}
+                        onChange={(e) => setEditTitleBuffer(e.target.value)}
+                        className="flex-grow bg-[#0c0d12]/60 px-2 py-1 border border-[#8b5cf6] rounded-lg text-xs leading-normal font-bold"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleInlineTitleSave();
+                          if (e.key === 'Escape') setIsEditingTitle(false);
+                        }}
+                      />
+                      <button 
+                        onClick={handleInlineTitleSave}
+                        className="p-1 text-emerald-400 hover:bg-emerald-500/10 rounded"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <h3 
+                      onClick={() => {
+                        setEditTitleBuffer(activeTask.title);
+                        setIsEditingTitle(true);
+                      }}
+                      className="text-base font-extrabold text-gray-900 dark:text-white tracking-tight leading-snug cursor-text hover:text-[#8b5cf6] dark:hover:text-[#06b6d4] transition font-display"
+                    >
+                      {activeTask.title}
+                    </h3>
+                  )}
+                </div>
+ 
+                {/* SUBTASK PROGRESS METER */}
+                {(() => {
+                  const { subtasks } = parseTaskMetadata(activeTask.description || '');
+                  const total = subtasks.length;
+                  const completed = subtasks.filter(s => s.completed).length;
+                  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+ 
+                  return (
+                    <div className="space-y-1.5 p-3.5 bg-slate-100/40 dark:bg-black/20 border border-slate-200 dark:border-white/5 rounded-2xl">
+                      <div className="flex items-center justify-between text-[11px] font-bold">
+                        <span className="text-gray-400 uppercase tracking-widest font-mono">Progress Metric</span>
+                        <span className="text-[#8b5cf6] dark:text-[#06b6d4]">{completed}/{total} Checklist Checkpoints ({percent}%)</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-200 dark:bg-white/5 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-gradient-to-r from-[#8b5cf6] to-[#06b6d4] transition-all duration-300"
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* CORES OVERALL META DETAILS ASSIGNED GRID */}
+                <div className="space-y-2 p-3.5 bg-slate-100/40 dark:bg-black/20 border border-slate-200 dark:border-white/5 rounded-2xl text-[11px] font-bold">
+                  <span className="text-gray-400 uppercase tracking-widest font-mono block pb-1 border-b border-white/5">
+                    Metadata Specification
+                  </span>
+                  
+                  <div className="grid grid-cols-2 gap-y-2.5 gap-x-2 pt-1 font-semibold">
+                    
+                    {/* Due date field */}
+                    <div className="text-gray-400 flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 shrink-0" />
+                      <span>Due Date</span>
+                    </div>
+                    <div>
+                      <input 
+                        type="date"
+                        value={activeTask.due_date || ''}
+                        onChange={(e) => handleFieldChange('due_date', e.target.value)}
+                        className="bg-transparent text-gray-800 dark:text-gray-200 border-none px-0.5 focus:outline-none w-full text-right font-mono"
+                      />
+                    </div>
+
+                    {/* Priority Selector buttons */}
+                    <div className="text-gray-400 flex items-center gap-1">
+                      <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" />
+                      <span>Priority</span>
+                    </div>
+                    <div className="text-right">
+                      <select
+                        value={activeTask.priority}
+                        onChange={(e) => handleFieldChange('priority', e.target.value)}
+                        className="bg-transparent text-gray-800 dark:text-gray-200 border-none focus:outline-none focus:ring-0 text-right text-[10px] uppercase font-bold"
+                      >
+                        <option value="low" className="dark:bg-[#0c0d12]">Low</option>
+                        <option value="medium" className="dark:bg-[#0c0d12]">Medium</option>
+                        <option value="high" className="dark:bg-[#0c0d12]">High</option>
+                      </select>
+                    </div>
+
+                    {/* Project/Category Field */}
+                    <div className="text-gray-400 flex items-center gap-1">
+                      <FolderOpen className="w-3.5 h-3.5 shrink-0" />
+                      <span>Project Name</span>
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        value={activeTask.category || 'General'}
+                        onChange={(e) => handleFieldChange('category', e.target.value)}
+                        className="bg-transparent text-gray-800 dark:text-gray-200 border-none px-0.5 focus:outline-none w-full text-right focus:border-b focus:border-white/20"
+                        placeholder="Tag project..."
+                      />
+                    </div>
+
+                    {/* Assigned User Widget */}
+                    <div className="text-gray-400 flex items-center gap-1">
+                      <UserIcon className="w-3.5 h-3.5 shrink-0" />
+                      <span>Assigned To</span>
+                    </div>
+                    <div className="text-right relative">
+                      {(() => {
+                        const meta = parseTaskMetadata(activeTask.description || '');
+                        return (
+                          <div>
+                            <button
+                              type="button"
+                              onClick={() => setShowAssigneeDrop(!showAssigneeDrop)}
+                              className="text-[10px] uppercase text-[#6366f1] dark:text-[#3b82f6] font-black focus:outline-none hover:underline"
+                            >
+                              {meta.assigned ? meta.assigned.username : 'UNASSIGNED'}
+                            </button>
+                            {showAssigneeDrop && (
+                              <div className="absolute right-0 top-full mt-1.5 z-40 bg-white dark:bg-[#12131b] border border-slate-200 dark:border-white/10 p-1.5 rounded-xl shadow-xl w-44 flex flex-col gap-1 text-left">
+                                <span className="text-[9px] text-gray-400 px-1 font-bold">CHOOSE PERSON:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleChangeAssignee(null)}
+                                  className="px-2 py-1 text-[10px] font-bold text-gray-400 hover:text-white hover:bg-rose-500/10 rounded-lg text-left"
+                                >
+                                  UNASSIGN (NONE)
+                                </button>
+                                {presetAssignees.map(user => (
+                                  <button
+                                    key={user.username}
+                                    type="button"
+                                    onClick={() => handleChangeAssignee(user)}
+                                    className="px-2 py-1.5 rounded-lg text-left text-[10px] text-gray-400 hover:text-white hover:bg-[#6366f1] transition font-bold"
+                                  >
+                                    {user.username}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* DETAILED SUBTASK CHECKLIST */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-bold text-gray-400 uppercase font-mono tracking-wider">
+                    Checklist Checkpoints
+                  </h4>
+
+                  {/* Add Checkpoint Form */}
+                  <form onSubmit={handleAddSubtask} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newSubtaskText}
+                      onChange={(e) => setNewSubtaskText(e.target.value)}
+                      placeholder="Add checklist checkpoint item..."
+                      className="flex-grow bg-[#0c0d12]/40 text-xs px-3 py-2 rounded-xl border border-slate-200 dark:border-white/10 text-gray-800 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-[#6366f1]"
+                    />
+                    <button
+                      type="submit"
+                      className="px-3 bg-[#6366f1] text-white text-xs font-bold rounded-xl hover:bg-indigo-500 cursor-pointer"
+                    >
+                      Add
+                    </button>
+                  </form>
+
+                  {/* Checklist listings */}
+                  {(() => {
+                    const meta = parseTaskMetadata(activeTask.description || '');
+                    return (
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                        {meta.subtasks.length === 0 ? (
+                          <p className="text-[10px] text-gray-400 dark:text-slate-500 font-semibold italic text-center py-2">
+                            No checkpoint checkpoints yet. Type and add one above!
+                          </p>
+                        ) : (
+                          meta.subtasks.map(sub => (
+                            <div 
+                              key={sub.id} 
+                              className="flex items-center justify-between gap-2 p-1.5 bg-slate-500/5 hover:bg-slate-500/10 rounded-xl group"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleSubtask(sub.id, sub.completed)}
+                                  className={`w-4.5 h-4.5 rounded-md border flex items-center justify-center shrink-0 transition cursor-pointer ${
+                                    sub.completed 
+                                      ? 'bg-gradient-to-tr from-[#6366f1] to-[#3b82f6] border-opacity-0 text-white' 
+                                      : 'border-slate-350 dark:border-white/5 hover:border-[#6366f1]'
+                                  }`}
+                                >
+                                  {sub.completed && <Check className="w-3 h-3 stroke-[3px]" />}
+                                </button>
+                                <span className={`text-[11px] font-semibold truncate ${
+                                  sub.completed ? 'line-through text-gray-500' : 'text-gray-800 dark:text-slate-200'
+                                }`}>
+                                  {sub.text}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteChecklistSubtask(sub.id)}
+                                className="opacity-0 group-hover:opacity-100 p-1 hover:bg-rose-500/20 rounded text-rose-500 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* CHRONOLOGICAL ACTIVITY LOG */}
+                <div className="space-y-2 border-t border-slate-100 dark:border-white/5 pt-4">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-gray-400 uppercase font-mono tracking-wider">
+                    <Clock className="w-3.5 h-3.5 text-gray-500" />
+                    <span>Audit Activity Log</span>
+                  </div>
+
+                  {(() => {
+                    const meta = parseTaskMetadata(activeTask.description || '');
+                    return (
+                      <div className="space-y-2 max-h-36 overflow-y-auto pr-1 font-mono text-[9px] font-semibold">
+                        {meta.activity.length === 0 ? (
+                          <p className="text-gray-500 dark:text-slate-500 italic py-1">No chronological edits recorded yet.</p>
+                        ) : (
+                          meta.activity.map(log => (
+                            <div key={log.id} className="flex items-start justify-between gap-2 text-gray-400 dark:text-slate-400 border-b border-white/5 pb-1">
+                              <span className="truncate leading-normal">{log.text}</span>
+                              <span className="shrink-0 text-[#6366f1] dark:text-[#3b82f6] font-bold">{log.timestamp}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+      </div>
+
     </div>
   );
+}
 
-  function onTaskChange(t: Task, newVal: boolean) {
-    onTaskUpdate(t.id, { completed: newVal });
-    toast(newVal ? `"${t.title}" marked completed!` : `"${t.title}" reopened.`, 'success');
-  }
+// ==========================================
+// SUB-COMPONENT: PORTABLE TASK CARD WITH DETECTIVES OVERHOVERS
+// ==========================================
+interface TaskCardProps {
+  key?: any;
+  task: Task;
+  selectedTaskId: string | null;
+  onSelect: () => void;
+  onTaskUpdate: (id: string, updates: Partial<Task>) => void;
+  onTaskDelete: (id: string) => void;
+  toast: (msg: string, type: 'success' | 'error' | 'info') => void;
+  triggerStreakJoy: () => void;
+}
 
-  function formatReadableDate(rawDate: string) {
-    if (!rawDate) return '';
-    try {
-      const parts = rawDate.split('-');
-      if (parts.length === 3) {
-        // Render simple MM/DD
-        return `${parts[1]}/${parts[2]}`;
-      }
-      return new Date(rawDate).toLocaleDateString([], { month: 'short', day: 'numeric' });
-    } catch (e) {
-      return rawDate;
+function TaskCard({
+  task,
+  selectedTaskId,
+  onSelect,
+  onTaskUpdate,
+  onTaskDelete,
+  toast,
+  triggerStreakJoy
+}: TaskCardProps) {
+  
+  const isSelected = selectedTaskId === task.id;
+
+  // Track state for completion pop animation
+  const [popClicked, setPopClicked] = useState(false);
+
+  // Parse custom metadata
+  const meta = useMemo(() => {
+    return parseTaskMetadata(task.description || '');
+  }, [task.description]);
+
+  // Priority color config
+  const getPriorityDot = (p: string) => {
+    switch (p) {
+      case 'high': return 'bg-rose-500 ring-4 ring-rose-500/10';
+      case 'medium': return 'bg-amber-500 ring-4 ring-amber-500/10';
+      default: return 'bg-slate-500 ring-4 ring-slate-500/10';
     }
-  }
+  };
 
-  function isOverdue(t: Task) {
-    if (t.completed || !t.due_date) return false;
-    const today = new Date().toISOString().split('T')[0];
-    return t.due_date < today!;
-  }
+  const formattedDate = (dStr: string) => {
+    if (!dStr) return '';
+    try {
+      const parts = dStr.split('-');
+      return `${parts[1]}/${parts[2]}`;
+    } catch {
+      return dStr;
+    }
+  };
+
+  const handleCheckboxClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPopClicked(true);
+    const nextVal = !task.completed;
+    onTaskUpdate(task.id, { completed: nextVal });
+
+    if (nextVal) {
+      triggerStreakJoy();
+      toast(`Excellent! Task "${task.title.slice(0, 18)}" tackled! Streak ticking 🔥`, 'success');
+    } else {
+      toast('Task reopened', 'info');
+    }
+
+    setTimeout(() => {
+      setPopClicked(false);
+    }, 600);
+  };
+
+  return (
+    <motion.div
+      onClick={onSelect}
+      whileHover={{ y: -1 }}
+      className={`border rounded-2xl p-3.5 flex items-start justify-between gap-3 cursor-pointer group transition-all relative overflow-hidden backdrop-blur-md ${
+        isSelected 
+          ? 'bg-gradient-to-r from-[#8b5cf6]/10 to-[#06b6d4]/10 border-[#8b5cf6]/30 dark:border-[#8b5cf6]/30 shadow-md' 
+          : 'bg-white/70 dark:bg-[#110b2b]/60 hover:bg-[#170f3b]/80 border-slate-200 dark:border-white/5 hover:border-[#8b5cf6]/20'
+      } ${task.completed ? 'opacity-85' : ''}`}
+    >
+      <div className="flex items-start gap-2.5 min-w-0 flex-grow">
+        
+        {/* CHECKBOX POP ANIMATION */}
+        <div className="pt-0.5 shrink-0" onClick={handleCheckboxClick}>
+          <motion.div
+            animate={popClicked ? { scale: [1, 1.4, 0.9, 1.1, 1], rotate: [0, 8, -8, 0] } : {}}
+            transition={{ duration: 0.5, type: 'spring' }}
+            className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center transition shrink-0 cursor-pointer ${
+              task.completed 
+                ? 'bg-gradient-to-tr from-[#8b5cf6] to-[#06b6d4] border-opacity-0 text-white font-extrabold' 
+                : 'border-slate-350 dark:border-white/10 hover:border-[#8b5cf6] bg-white/5'
+            }`}
+          >
+            {task.completed && <Check className="w-3.5 h-3.5 stroke-[3px]" />}
+          </motion.div>
+        </div>
+
+        {/* DETAILS SECTION */}
+        <div className="min-w-0 flex-grow space-y-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            
+            {/* PRIORITY GLOW DOT */}
+            <span className={`w-1.5 h-1.5 rounded-full block shrink-0 ${getPriorityDot(task.priority)}`} />
+            
+            <h4 className={`text-xs font-bold transition-all truncate leading-relaxed ${
+              task.completed ? 'line-through text-gray-500' : 'text-gray-950 dark:text-slate-100'
+            }`}>
+              {task.title}
+            </h4>
+          </div>
+
+          {/* SUBTASK INLINE SEGMENTED PROGRESS BARS */}
+          {meta.subtasks.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] text-gray-400 font-mono font-bold uppercase shrink-0">
+                Steps: {meta.subtasks.filter(s => s.completed).length}/{meta.subtasks.length}
+              </span>
+              
+              {/* SLENDER STEP SEGMENTS (highly slick look representing blocks filled or empty) */}
+              <div className="flex items-center gap-1 flex-grow max-w-24">
+                {meta.subtasks.map((sub, idx) => (
+                  <div
+                    key={sub.id || idx}
+                    className={`h-1 flex-grow rounded-full transition-colors ${
+                      sub.completed 
+                        ? 'bg-gradient-to-r from-[#8b5cf6] to-[#06b6d4]' 
+                        : 'bg-slate-200 dark:bg-white/5'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* PROJECT / DUE DATE BADGES */}
+          <div className="flex items-center gap-1.5 select-none text-[9px] font-bold flex-wrap">
+            <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/5 text-gray-400 uppercase tracking-widest font-mono">
+              {task.category || 'General'}
+            </span>
+            {task.due_date && (
+              <span className={`px-1.5 py-0.5 rounded-md flex items-center gap-0.5 font-mono ${
+                task.due_date < new Date().toISOString().split('T')[0] && !task.completed
+                  ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                  : 'bg-slate-100 dark:bg-white/5 text-gray-400 border border-slate-200 dark:border-white/5'
+              }`}>
+                <Calendar className="w-2.5 h-2.5" />
+                <span>{formattedDate(task.due_date)}</span>
+              </span>
+            )}
+            {meta.assigned && (
+              <span className="px-1.5 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/15 flex items-center gap-1 shrink-0">
+                <UserCheck className="w-2.5 h-2.5" />
+                <span>{meta.assigned.username.split(' ')[0]}</span>
+              </span>
+            )}
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* HOVER-REVEAL ACTION BUTTON BAR */}
+      <div 
+        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 self-center shrink-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect();
+          }}
+          title="Micro Details inline"
+          className="p-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 rounded-lg text-slate-400 hover:text-[#8b5cf6] transition cursor-pointer"
+        >
+          <SlidersHorizontal className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (confirm('Permanently purge this task card?')) onTaskDelete(task.id);
+          }}
+          title="Delete task card"
+          className="p-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-rose-500/20 rounded-lg text-slate-400 hover:text-rose-500 transition cursor-pointer"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+    </motion.div>
+  );
 }
